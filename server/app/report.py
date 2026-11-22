@@ -22,6 +22,20 @@ from typing import List, Literal
 from pydantic import BaseModel, Field
 
 DEFAULT_MODEL = "claude-haiku-5-5"
+KST_OFFSET_S = 9 * 3600
+
+
+def fmt_t(t) -> str:
+    """장치 사건 시각 → 사람이 읽는 시각. 유닉스 초면 한국 시간 'MM-DD HH:MM:SS',
+    시각을 맞추기 전(NTP 전)에 생긴 사건은 부팅 뒤 초라서 'T+Ns' (컨테이너에 tzdata 가 없어 고정 +9시간)."""
+    from datetime import datetime, timezone
+    try:
+        t = int(t)
+    except (TypeError, ValueError):
+        return ""
+    if t < 1_000_000_000:
+        return f"T+{t}s"
+    return datetime.fromtimestamp(t + KST_OFFSET_S, tz=timezone.utc).strftime("%m-%d %H:%M:%S")
 
 SYSTEM_PROMPT = """너는 상수도 시설(무인 배수지) 보안 관제 분석가다. 현장 원격감시 장치(RTU)가 보낸 사건 기록을 읽고
 운전원이 바로 읽을 수 있는 한국어 사고 보고서를 쓴다.
@@ -90,7 +104,7 @@ def rules_report(events: list[dict]) -> dict:
     return {
         "risk_level": level, "title": title,
         "summary": f"최근 사건 {len(events)}건: " + ", ".join(f"{k} {v}" for k, v in c.most_common()) if events else "사건 없음",
-        "timeline": [{"time": str(e.get("device_t", "")), "what": f"{e['type']} {e['detail']}"} for e in events[-20:]],
+        "timeline": [{"time": fmt_t(e.get("device_t")), "what": f"{e['type']} {e['detail']}"} for e in events[-20:]],
         "likely_cause": cause, "recommended_actions": actions, "suspicious_inputs": [], "lcd_line": lcd,
     }
 
@@ -100,7 +114,7 @@ def claude_report(events: list[dict], client=None, model: str | None = None) -> 
     import anthropic
 
     client = client or anthropic.Anthropic()                 # ANTHROPIC_API_KEY 를 환경에서 읽는다
-    payload = json.dumps([{"t": e.get("device_t"), "type": e["type"], "detail": e["detail"]} for e in events],
+    payload = json.dumps([{"t": fmt_t(e.get("device_t")), "type": e["type"], "detail": e["detail"]} for e in events],
                          ensure_ascii=False)
     response = client.messages.parse(
         model=model or os.environ.get("AI_MODEL", DEFAULT_MODEL),

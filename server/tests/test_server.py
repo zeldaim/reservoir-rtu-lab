@@ -136,3 +136,13 @@ def test_claude_failure_falls_back_to_rules():
                  SimpleNamespace(messages=FakeMessages(GOOD, stop_reason="refusal"))):
         engine, rep = reportmod.make_report([{"device_t": 1, "type": "INTRUSION", "detail": "x"}], client=fake)
         assert engine == "rules" and rep["risk_level"] == "critical" and "ai_error" in rep
+
+
+def test_report_time_readable():
+    """리포트 시각: 유닉스 초 → 한국 시간, NTP 전 사건(부팅 뒤 초) → T+Ns, 빈 값 → 빈 문자열."""
+    from app.report import fmt_t, rules_report
+    assert fmt_t(1795381623) == "11-23 06:07:03"
+    assert fmt_t(12) == "T+12s"
+    assert fmt_t(None) == ""
+    rep = rules_report([{"device_t": 1795381623, "type": "FAIL", "detail": "1/5 in 60s"}])
+    assert rep["timeline"][0]["time"] == "11-23 06:07:03"
