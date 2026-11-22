@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "author": "",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-pushbutton", "id": "btn1", "top": -150, "left": -260, "attrs": { "color": "blue", "label": "1" } },
+    { "type": "wokwi-pushbutton", "id": "btn2", "top": -150, "left": -170, "attrs": { "color": "blue", "label": "2" } },
+    { "type": "wokwi-pushbutton", "id": "btn3", "top": -150, "left": -80, "attrs": { "color": "blue", "label": "3" } },
+    { "type": "wokwi-pushbutton", "id": "btn4", "top": -150, "left": 10, "attrs": { "color": "blue", "label": "4" } },
+    { "type": "wokwi-servo", "id": "door", "top": 200, "left": 220, "attrs": {} },
+    { "type": "wokwi-servo", "id": "valve", "top": 320, "left": 220, "attrs": {} },
+    { "type": "wokwi-buzzer", "id": "bz", "top": 170, "left": -220, "attrs": { "volume": "0.3" } },
+    { "type": "wokwi-hc-sr04", "id": "level", "top": -170, "left": 200, "attrs": { "distance": "100" } },
+    { "type": "wokwi-pir-motion-sensor", "id": "pir", "top": -170, "left": 420, "attrs": {} },
+    { "type": "wokwi-lcd1602", "id": "lcd", "top": -20, "left": 260, "attrs": { "pins": "i2c" } },
+    { "type": "wokwi-led", "id": "ledok", "top": 60, "left": -170, "attrs": { "color": "green" } },
+    { "type": "wokwi-led", "id": "ledng", "top": 60, "left": -120, "attrs": { "color": "red" } },
+    { "type": "wokwi-led", "id": "pump", "top": 60, "left": -70, "attrs": { "color": "blue", "label": "pump" } },
+    { "type": "wokwi-resistor", "id": "r1", "top": 120, "left": -180, "rotate": 90, "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "r2", "top": 120, "left": -130, "rotate": 90, "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "r3", "top": 120, "left": -80, "rotate": 90, "attrs": { "value": "220" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "btn1:1.l", "esp:13", "blue", [] ],
+    [ "btn2:1.l", "esp:12", "blue", [] ],
+    [ "btn3:1.l", "esp:14", "blue", [] ],
+    [ "btn4:1.l", "esp:27", "blue", [] ],
+    [ "btn1:2.r", "esp:GND.1", "black", [] ],
+    [ "btn2:2.r", "esp:GND.1", "black", [] ],
+    [ "btn3:2.r", "esp:GND.1", "black", [] ],
+    [ "btn4:2.r", "esp:GND.1", "black", [] ],
+
+    [ "door:PWM", "esp:18", "orange", [] ],
+    [ "door:V+", "esp:5V", "red", [] ],
+    [ "door:GND", "esp:GND.2", "black", [] ],
+    [ "valve:PWM", "esp:23", "orange", [] ],
+    [ "valve:V+", "esp:5V", "red", [] ],
+    [ "valve:GND", "esp:GND.2", "black", [] ],
+
+    [ "bz:2", "esp:19", "purple", [] ],
+    [ "bz:1", "esp:GND.1", "black", [] ],
+
+    [ "level:VCC", "esp:5V", "red", [] ],
+    [ "level:TRIG", "esp:5", "green", [] ],
+    [ "level:ECHO", "esp:17", "yellow", [] ],
+    [ "level:GND", "esp:GND.2", "black", [] ],
+
+    [ "pir:VCC", "esp:5V", "red", [] ],
+    [ "pir:OUT", "esp:33", "violet", [] ],
+    [ "pir:GND", "esp:GND.2", "black", [] ],
+
+    [ "lcd:VCC", "esp:5V", "red", [] ],
+    [ "lcd:GND", "esp:GND.2", "black", [] ],
+    [ "lcd:SDA", "esp:21", "green", [] ],
+    [ "lcd:SCL", "esp:22", "blue", [] ],
+
+    [ "ledok:A", "esp:25", "green", [] ],
+    [ "ledok:C", "r1:1", "black", [] ],
+    [ "r1:2", "esp:GND.1", "black", [] ],
+    [ "ledng:A", "esp:26", "red", [] ],
+    [ "ledng:C", "r2:1", "black", [] ],
+    [ "r2:2", "esp:GND.1", "black", [] ],
+    [ "pump:A", "esp:32", "blue", [] ],
+    [ "pump:C", "r3:1", "black", [] ],
+    [ "r3:2", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}
