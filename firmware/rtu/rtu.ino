@@ -637,7 +637,10 @@ int netSendBatch() {
   snprintf(prefix, sizeof(prefix), "%ld\n%llu\n", ts, seq);
   hmacHex(prefix, netBody, len, sig);
 
-  String url = String(SERVER_URL) + "/api/v1/sites/" + SITE_ID + "/events";
+  String url = String(SERVER_URL);
+  url.trim();                              // 붙여 넣다 들어간 앞뒤 공백 (" https://…" 이면 begin 이 바로 실패: -100)
+  while (url.endsWith("/")) url.remove(url.length() - 1);
+  url += String("/api/v1/sites/") + SITE_ID + "/events";
   bool tls = url.startsWith("https://");
   WiFiClientSecure sec;
   WiFiClient plain;
@@ -647,7 +650,11 @@ int netSendBatch() {
   http.setTimeout(10000);
   uint32_t t0 = millis();
   bool ok = tls ? http.begin(sec, url) : http.begin(plain, url);
-  if (!ok) { netLastStatus = -100; return -100; }
+  if (!ok) {                               // 주소 형식 오류 — 연결도 안 해 봄. secrets.h 의 SERVER_URL 확인
+    netLastStatus = -100;
+    netLog("NET 주소 형식 오류 — secrets.h 의 SERVER_URL 이 https://… 로 시작하는지 확인");
+    return -100;
+  }
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
   snprintf(hdr, sizeof(hdr), "%ld", ts);
