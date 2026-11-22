@@ -568,12 +568,28 @@ void netLog(const char* msg) {
 }
 
 // Wi-Fi 연결 + NTP 시각 맞춤 (서명 시각이 맞아야 서버가 받는다). 둘 다 되면 true
+bool netWifiStarted = false;
+int  netWifiFails    = 0;
+
 bool netEnsure() {
   if (WiFi.status() != WL_CONNECTED) {
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    for (int i = 0; i < 100 && WiFi.status() != WL_CONNECTED; i++) vTaskDelay(pdMS_TO_TICKS(100));
-    if (WiFi.status() != WL_CONNECTED) { netLog("NET wifi 연결 실패 — 다시 시도"); return false; }
+    if (!netWifiStarted) {                 // begin 은 한 번만 — 다시 부르면 진행 중이던 연결이 처음부터 다시 시작됨
+      WiFi.mode(WIFI_STA);
+      WiFi.setAutoReconnect(true);
+      if (strcmp(WIFI_SSID, "Wokwi-GUEST") == 0) WiFi.begin(WIFI_SSID, WIFI_PASS, 6);   // Wokwi 는 채널 6 지정이 빠름
+      else WiFi.begin(WIFI_SSID, WIFI_PASS);
+      netWifiStarted = true;
+    }
+    for (int i = 0; i < 200 && WiFi.status() != WL_CONNECTED; i++) vTaskDelay(pdMS_TO_TICKS(100));   // 최대 20초
+    if (WiFi.status() != WL_CONNECTED) {
+      char f[80];
+      netWifiFails++;
+      snprintf(f, sizeof(f), "NET wifi 연결 실패 status=%d (%d회 연속) — 다시 시도", (int)WiFi.status(), netWifiFails);
+      netLog(f);
+      if (netWifiFails >= 3) { WiFi.disconnect(); netWifiStarted = false; netWifiFails = 0; }   // 3번 실패하면 처음부터
+      return false;
+    }
+    netWifiFails = 0;
     char m[64];
     snprintf(m, sizeof(m), "NET wifi 연결 ip=%s", WiFi.localIP().toString().c_str());
     netLog(m);
