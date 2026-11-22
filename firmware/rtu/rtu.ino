@@ -68,6 +68,8 @@ const int LEVEL_LOW     = 50;              // 이 아래면 밸브 닫고 펌프
 const int LEVEL_HH      = 190;             // 넘침 경보
 const int LEVEL_LL      = 20;              // 고갈 경보
 const int JUMP_CM_PER_S = 30;              // 1초에 이만큼 넘게 변하면 이상
+const uint32_t JUMP_WINDOW_MS = 10000;     // 급변은 첫 건만 바로, 이 시간 동안은 묶어서 한 줄
+const int ALARM_DEADBAND = 5;              // 경보 해제는 기준에서 이만큼(cm) 되돌아와야
 const uint32_t PROCESS_MS = 200;
 const float MOTOR_HOT_C   = 70.0;          // 인터록: 펌프 모터가 이 위면 펌프 강제 정지
 const float MOTOR_RESET_C = 60.0;          //   이 아래로 식어야 다시 돌 수 있음 (히스테리시스)
@@ -218,6 +220,9 @@ void processTask(void*) {
   bool hhActive = false, llActive = false, sensorErr = false;
   int lastLevel = -1;
   uint32_t lastLevelAt = 0;
+  uint32_t jumpWindowStart = 0;            // 급변 묶음: 첫 급변은 바로, 이후 JUMP_WINDOW_MS 동안은 세기만
+  int jumpCount = 0, jumpMaxRate = 0;
+  char lastLine[17] = "";                  // LCD 2줄 — 바뀔 때만 쓴다
   int64_t lastIter = esp_timer_get_time();
   char d[32];
 
@@ -227,22 +232,40 @@ void processTask(void*) {
     long dist = readDistanceCm();
 
     if (dist < 0) {
-      if (!sensorErr) logEvent("SENSOR_ERR", "level sensor no echo");   // 들어갈 때 한 번
+      if (!sensorErr) {                    // 들어갈 때 한 번
+        logEvent("SENSOR_ERR", "level sensor no echo");
+        showLine(1, "LEVEL SENSOR ERR");
+        lastLine[0] = '\0';                // 회복하면 2줄을 다시 쓰게
+      }
       sensorErr = true;
       digitalWrite(PIN_PUMP, LOW);         // 안전 쪽으로: 수위를 모르면 펌프를 끈다 (넘침 방지)
-      showLine(1, "LEVEL SENSOR ERR");
     } else {
       sensorErr = false;
       int level = constrain(TANK_CM - (int)dist, 0, TANK_CM);
       levelNow = level;
 
-      // 변화 속도 — 물리적으로 불가능하게 빠르면 센서 조작 · 누수 의심
+      // 변화 속도 — 물리적으로 불가능하게 빠르면 센서 조작 · 누수 의심.
+      // Wokwi 실측: 슬라이더를 끌면 몇 초에 급변 수십 건 → 전송 큐(20칸)가 차서 다른 사건까지 못 보냈다.
+      // 그래서 첫 급변만 바로 기록하고, 이후 10초는 세기만 하다가 묶어서 한 줄 (경보 묶음 · throttle)
       if (lastLevel >= 0 && now > lastLevelAt) {
         int rate = abs(level - lastLevel) * 1000 / (int)(now - lastLevelAt);
         if (rate > JUMP_CM_PER_S) {
-          snprintf(d, sizeof(d), "%d->%dcm %dcm/s", lastLevel, level, rate);
+          if (jumpWindowStart == 0) {
+            snprintf(d, sizeof(d), "%d->%dcm %dcm/s", lastLevel, level, rate);
+            logEvent("LEVEL_JUMP", d);
+            jumpWindowStart = now; jumpCount = 0; jumpMaxRate = 0;
+          } else {
+            jumpCount++;
+            if (rate > jumpMaxRate) jumpMaxRate = rate;
+          }
+        }
+      }
+      if (jumpWindowStart && now - jumpWindowStart >= JUMP_WINDOW_MS) {
+        if (jumpCount > 0) {
+          snprintf(d, sizeof(d), "+%d in 10s max %dcm/s", jumpCount, jumpMaxRate);
           logEvent("LEVEL_JUMP", d);
         }
+        jumpWindowStart = 0;
       }
       lastLevel = level; lastLevelAt = now;
 
@@ -273,24 +296,33 @@ void processTask(void*) {
       valve.write(valveOpen ? 90 : 0);
       digitalWrite(PIN_PUMP, (pumpOn && !interlock) ? HIGH : LOW);
 
-      // 공정 경보 (들어갈 때 한 번)
+      // 공정 경보 — 들어갈 때 한 번, ALARM_DEADBAND 만큼 되돌아와야 해제
+      // (Wokwi 실측: 190cm 언저리에서 HH 가 190 · 193 … 거듭 울렸다 — 경계에서 떨림)
       if (level >= LEVEL_HH && !hhActive) {
         snprintf(d, sizeof(d), "HH %dcm overflow risk", level);
         logEvent("ALARM", d);
         sound(1800, 300, 2);
+        hhActive = true;
+      } else if (hhActive && level < LEVEL_HH - ALARM_DEADBAND) {
+        hhActive = false;
       }
       if (level <= LEVEL_LL && !llActive) {
         snprintf(d, sizeof(d), "LL %dcm tank low", level);
         logEvent("ALARM", d);
         sound(500, 300, 2);
+        llActive = true;
+      } else if (llActive && level > LEVEL_LL + ALARM_DEADBAND) {
+        llActive = false;
       }
-      hhActive = level >= LEVEL_HH;
-      llActive = level <= LEVEL_LL;
 
+      // LCD 는 I2C 라 느리다 — 0.2초마다 다시 쓰면 공정 작업 주기가 늘고(실측 256ms) 입력 작업이 LCD 를 기다린다
       char l2[17];
       snprintf(l2, sizeof(l2), "L%3d V%s P%s", level, valveOpen ? "OPN" : "SHT",
                interlock ? "IL" : (pumpOn ? "ON" : "OF"));       // IL = 인터록으로 정지
-      showLine(1, l2);
+      if (strcmp(l2, lastLine) != 0) {
+        showLine(1, l2);
+        strlcpy(lastLine, l2, sizeof(lastLine));
+      }
     }
     vTaskDelay(pdMS_TO_TICKS(PROCESS_MS));
   }
