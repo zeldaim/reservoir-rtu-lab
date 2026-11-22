@@ -36,11 +36,15 @@ def read_secrets():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1:8090")
-    ap.add_argument("--scenario", choices=SCENARIOS, default="intrusion")
+    ap.add_argument("--scenario", choices=[*SCENARIOS, "slow"], default="intrusion")
     ap.add_argument("--seq", type=int, default=int(time.time() * 1000), help="일련번호 (기본: 지금 시각 ms — 늘 커진다 · 장치도 유닉스 초×1000 에서 시작)")
     a = ap.parse_args()
     s = read_secrets()
-    events = [{"t": i * 3, "type": t, "detail": d} for i, (t, d) in enumerate(SCENARIOS[a.scenario])]
+    if a.scenario == "slow":   # 4단계 a: 15초마다 1번씩 40번 PIN 실패 = 1분에 4번 → 장치 잠금(60초 5회)에 안 걸림
+        now = int(time.time())
+        events = [{"t": now - (39 - i) * 15, "type": "FAIL", "detail": f"{i % 4 + 1}/5 in 60s"} for i in range(40)]
+    else:
+        events = [{"t": i * 3, "type": t, "detail": d} for i, (t, d) in enumerate(SCENARIOS[a.scenario])]
     body = json.dumps({"events": events}).encode()
     ts = int(time.time())
     sig = hmac.new(s["DEVICE_SECRET"].encode(), f"{ts}\n{a.seq}\n".encode() + body, hashlib.sha256).hexdigest()

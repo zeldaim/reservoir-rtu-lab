@@ -89,6 +89,11 @@ def rules_report(events: list[dict]) -> dict:
         level, title, lcd = "critical", "인증 없는 출입 감지", "INTRUSION ALERT"
         cause = "PIN 인증 없이 움직임 감지 — 무단 침입 가능성" + (" (앞서 PIN 실패 · 잠금 있음)" if c["LOCKOUT"] or c["FAIL"] else "")
         actions = ["현장 CCTV 확인", "출동 요청", "출입 기록과 대조"]
+    elif c["SRV_BRUTE"]:
+        level, title, lcd = "high", "느린 무차별 대입 의심 (서버 탐지)", "PIN ATTACK?"
+        last = [e["detail"] for e in events if e["type"] == "SRV_BRUTE"][-1]
+        cause = f"{last} — 장치 잠금 기준(60초 5회) 아래로 오래 시도하는 PIN 추측 가능성"
+        actions = ["PIN 변경", "현장 출입 기록 · CCTV 확인", "조작반 원격 잠금 검토"]
     elif c["LOCKOUT"]:
         level, title, lcd = "high", "조작반 무차별 대입 시도", "PIN ATTACK?"
         cause = f"PIN 실패 {c['FAIL']}회 · 잠금 {c['LOCKOUT']}회 — 비밀번호 추측 시도 가능성"

@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS ix_events_site_time ON events(site_id, received_at);
 CREATE TABLE IF NOT EXISTS device_seq (device_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS detections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, site_id TEXT NOT NULL, created_at REAL NOT NULL,
+  kind TEXT NOT NULL, win TEXT NOT NULL, detail_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_det_site_time ON detections(site_id, created_at);
 CREATE TABLE IF NOT EXISTS reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT, site_id TEXT NOT NULL, created_at REAL NOT NULL,
   engine TEXT NOT NULL, report_json TEXT NOT NULL
@@ -48,6 +53,22 @@ class Store:
                               (site_id, since, limit))
         return [{"received_at": r[0], "device_id": r[1], "device_t": r[2], "type": r[3], "detail": r[4]}
                 for r in cur]
+
+    def add_detection(self, site_id: str, det: dict, dedupe_s: float) -> bool:
+        """같은 사이트 · 종류 · 창의 탐지가 dedupe_s 안에 있으면 남기지 않음. 새로 남겼으면 True."""
+        now = time.time()
+        if self.db.execute("SELECT 1 FROM detections WHERE site_id=? AND kind=? AND win=? AND created_at>=?",
+                           (site_id, det["kind"], det["window"], now - dedupe_s)).fetchone():
+            return False
+        with self.db:
+            self.db.execute("INSERT INTO detections(site_id, created_at, kind, win, detail_json) VALUES (?,?,?,?,?)",
+                            (site_id, now, det["kind"], det["window"], json.dumps(det, ensure_ascii=False)))
+        return True
+
+    def detections(self, site_id: str, since: float) -> list[dict]:
+        cur = self.db.execute("SELECT created_at, detail_json FROM detections WHERE site_id=? AND created_at>=? "
+                              "ORDER BY id", (site_id, since))
+        return [{"created_at": r[0], **json.loads(r[1])} for r in cur]
 
     def save_report(self, site_id: str, engine: str, report: dict) -> int:
         with self.db:

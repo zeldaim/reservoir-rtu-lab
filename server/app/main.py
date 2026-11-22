@@ -21,6 +21,7 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from . import detect
 from . import report as reportmod
 from .security import AuthError, Device, verify
 from .store import Store
@@ -87,6 +88,10 @@ def create_app(store: Store | None = None, devices: dict | None = None, operator
         seq = int(headers["x-seq"])
         n = app.state.store.add_events(site_id, dev.device_id, seq, events)
         app.state.last_seq[dev.device_id] = seq          # 저장에 성공한 뒤에만 올린다
+        now = time.time()                                # 4단계 a: 긴 창으로 느린 무차별 대입 탐지
+        for det in detect.slow_bruteforce(app.state.store.events(site_id, now - 24 * 3600, limit=5000), now):
+            if app.state.store.add_detection(site_id, det, detect.DEDUPE_S):
+                log.warning("detection site=%s %s", site_id, det["detail"])
         return {"stored": n, "seq": seq}
 
     @app.get("/api/v1/sites/{site_id}/summary")
@@ -103,10 +108,19 @@ def create_app(store: Store | None = None, devices: dict | None = None, operator
         operator_for(request, site_id)
         return {"events": app.state.store.events(site_id, time.time() - max(1, min(minutes, 1440)) * 60)}
 
+    @app.get("/api/v1/sites/{site_id}/detections")
+    def get_detections(site_id: str, request: Request, minutes: int = 1440):
+        operator_for(request, site_id)
+        return {"detections": app.state.store.detections(site_id, time.time() - max(1, min(minutes, 10080)) * 60)}
+
     @app.post("/api/v1/sites/{site_id}/report")
     def post_report(site_id: str, request: Request, minutes: int = 60):
         operator_for(request, site_id)
-        events = app.state.store.events(site_id, time.time() - max(1, min(minutes, 1440)) * 60)
+        since = time.time() - max(1, min(minutes, 1440)) * 60
+        events = app.state.store.events(site_id, since)
+        # 서버 탐지도 사건처럼 넘긴다 — 규칙 · AI 보고서가 함께 판단 (장치 사건과 구분되게 SRV_ 접두어)
+        events += [{"device_t": int(d["created_at"]), "type": "SRV_BRUTE", "detail": d["detail"]}
+                   for d in app.state.store.detections(site_id, since)]
         engine, rep = reportmod.make_report(events, client=app.state.ai_client)
         app.state.store.save_report(site_id, engine, rep)
         return {"engine": engine, "events": len(events), "report": rep}

@@ -146,3 +146,35 @@ def test_report_time_readable():
     assert fmt_t(None) == ""
     rep = rules_report([{"device_t": 1795381623, "type": "FAIL", "detail": "1/5 in 60s"}])
     assert rep["timeline"][0]["time"] == "11-23 06:07:03"
+
+
+# ── 4단계 a: 느린 무차별 대입 (장치 레이트 리밋 60초 5회 아래) ──
+def slow_events(n, every_s, end=None):
+    """1분에 4번 꼴(every_s=15)로 n번 PIN 실패 — 장치는 한 번도 안 잠김."""
+    end = int(time.time()) if end is None else end
+    return [{"t": end - (n - 1 - i) * every_s, "type": "FAIL", "detail": f"{i % 4 + 1}/5 in 60s"} for i in range(n)]
+
+
+def test_detect_unit():
+    from app.detect import slow_bruteforce
+    now = time.time()
+    ev = [{"device_t": e["t"], "type": e["type"]} for e in slow_events(40, 15, int(now))]   # 10분에 40번
+    det = slow_bruteforce(ev, now)
+    assert [d["window"] for d in det] == ["30분", "24시간"] and det[0]["fails"] == 40 and det[0]["device_lockouts"] == 0
+    assert "레이트 리밋 아래" in det[0]["detail"]
+    typo = [{"device_t": now - 60 * i, "type": "FAIL"} for i in range(3)]                   # 오타 3번
+    assert slow_bruteforce(typo, now) == []
+    old = [{"device_t": now - 2 * 86400 + i, "type": "FAIL"} for i in range(50)]           # 이틀 전 = 창 밖
+    assert slow_bruteforce(old, now) == []
+
+
+def test_detect_endpoint_and_report(client):
+    assert post(client, DEV_A, "site-a", slow_events(12, 15), seq=1).status_code == 200
+    r = client.get("/api/v1/sites/site-a/detections", headers={"Authorization": "Bearer op-a"})
+    assert r.status_code == 200 and [d["window"] for d in r.json()["detections"]] == ["30분"]
+    assert post(client, DEV_A, "site-a", slow_events(12, 15), seq=2).status_code == 200    # 같은 창은 30분에 한 번만
+    dets = client.get("/api/v1/sites/site-a/detections", headers={"Authorization": "Bearer op-a"}).json()["detections"]
+    assert [d["window"] for d in dets] == ["30분", "24시간"]                                 # 누적 24 ≥ 20 → 24시간 창 새로
+    rep = client.post("/api/v1/sites/site-a/report", headers={"Authorization": "Bearer op-a"}).json()["report"]
+    assert rep["title"].startswith("느린 무차별 대입") and rep["lcd_line"] == "PIN ATTACK?"
+    assert client.get("/api/v1/sites/site-b/detections", headers={"Authorization": "Bearer op-a"}).status_code == 403
