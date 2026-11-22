@@ -224,6 +224,7 @@ void processTask(void*) {
   int jumpCount = 0, jumpMaxRate = 0;
   char lastLine[17] = "";                  // LCD 2줄 — 바뀔 때만 쓴다
   int64_t lastIter = esp_timer_get_time();
+  TickType_t lastWake = xTaskGetTickCount();
   char d[32];
 
   for (;;) {
@@ -324,7 +325,9 @@ void processTask(void*) {
         strlcpy(lastLine, l2, sizeof(lastLine));
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(PROCESS_MS));
+    // 고정 주기: vTaskDelay(200) 은 "일한 뒤 200ms 쉼"이라 주기 = 200 + 일한 시간 (Wokwi 실측 256~261ms).
+    // vTaskDelayUntil 은 "지난번 깨어난 때부터 200ms" — 일이 200ms 안에 끝나면 주기가 정확히 200ms
+    vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(PROCESS_MS));
   }
 }
 
