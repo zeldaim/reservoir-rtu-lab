@@ -9,6 +9,8 @@ services:
   api:
     build: .
     env_file: [.env]
+    environment:
+      LAB_VULN_BOLA: ${LAB_VULN_BOLA:-0}   # 5단계 시연 때만 1 (취약 경로 /api/v0 켜짐) — 터널을 연 채로 켜지 말 것
     volumes: [rtu-data:/data]
     restart: unless-stopped
 

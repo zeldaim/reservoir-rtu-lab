@@ -178,3 +178,32 @@ def test_detect_endpoint_and_report(client):
     rep = client.post("/api/v1/sites/site-a/report", headers={"Authorization": "Bearer op-a"}).json()["report"]
     assert rep["title"].startswith("느린 무차별 대입") and rep["lcd_line"] == "PIN ATTACK?"
     assert client.get("/api/v1/sites/site-b/detections", headers={"Authorization": "Bearer op-a"}).status_code == 403
+
+
+# ── 5단계: BOLA — 취약 경로(v0) vs 고친 경로(v1) ──
+OPS2 = {"op-a": {"name": "운전원A", "token": "op-a", "sites": ["site-a"]},
+        "op-b": {"name": "운전원B", "token": "op-b", "sites": ["site-b"]}}
+
+
+def make(tmp_path, vuln):
+    app = create_app(store=Store(tmp_path / "b.db"), devices={d.token: d for d in (DEV_A, DEV_B)}, operators=OPS2,
+                     vuln_bola=vuln)
+    return TestClient(app)
+
+
+def test_bola_vuln_vs_fixed(tmp_path):
+    c = make(tmp_path, vuln=True)
+    assert post(c, DEV_A, "site-a", EV, seq=1).status_code == 200
+    B, A = {"Authorization": "Bearer op-b"}, {"Authorization": "Bearer op-a"}
+    leak = c.get("/api/v0/sites/site-a/events", headers=B)                   # 주소의 site 만 바꿈
+    assert leak.status_code == 200 and len(leak.json()["events"]) == 1        # 남의 사이트 사건이 샘 (취약)
+    assert c.get("/api/v1/sites/site-a/events", headers=B).status_code == 403  # 고친 쪽은 막음
+    assert c.get("/api/v0/sites/site-b/events", headers=B).status_code == 200  # 자기 사이트는 정상
+    kinds = [d["kind"] for d in c.get("/api/v1/sites/site-a/detections", headers=A).json()["detections"]]
+    assert kinds == ["BOLA_LEAK", "CROSS_SITE_DENIED"]                        # 당한 사이트 운전원이 볼 수 있음
+    assert c.get("/api/v0/sites/site-a/events").status_code == 401
+
+
+def test_bola_vuln_off_by_default(tmp_path):
+    c = make(tmp_path, vuln=None)                                             # 환경변수 없음 = 꺼짐
+    assert c.get("/api/v0/sites/site-a/events", headers={"Authorization": "Bearer op-b"}).status_code == 404

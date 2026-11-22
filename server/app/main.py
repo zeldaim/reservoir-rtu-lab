@@ -45,13 +45,24 @@ def load_operators() -> dict[str, dict]:
 
 
 def create_app(store: Store | None = None, devices: dict | None = None, operators: dict | None = None,
-               ai_client=None) -> FastAPI:
+               ai_client=None, vuln_bola: bool | None = None) -> FastAPI:
     app = FastAPI(title="reservoir-rtu control server", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store = store or Store(os.environ.get("DB_PATH", "/data/rtu.db"))
     app.state.devices = devices if devices is not None else load_devices()
     app.state.operators = operators if operators is not None else load_operators()
     app.state.last_seq = app.state.store.last_seq()
     app.state.ai_client = ai_client
+    # 5단계 시연용 취약 경로 — 기본 꺼짐. 터널(인터넷)을 연 채로 켜지 말 것
+    app.state.vuln_bola = vuln_bola if vuln_bola is not None else os.environ.get("LAB_VULN_BOLA") == "1"
+
+    def record_cross_site(op: dict, site_id: str, allowed: bool, path: str) -> None:
+        """다른 사이트 접근을 '당한 사이트' 쪽 탐지 기록에 남김 — 그 사이트 운전원이 누가 엿봤는지 볼 수 있게.
+        allowed=True 는 취약 경로에서 실제로 새어 나간 것(BOLA 성공), False 는 권한 검사가 막은 시도."""
+        det = {"kind": "BOLA_LEAK" if allowed else "CROSS_SITE_DENIED", "window": "즉시",
+               "operator": op.get("name"), "path": path,
+               "detail": f"다른 사이트 운전원 {op.get('name')} 가 {path} 접근 — " + ("응답이 나감(권한 검사 없음)" if allowed else "403 으로 막음")}
+        app.state.store.add_detection(site_id, det, dedupe_s=0)
+        log.warning("cross-site op=%s site=%s allowed=%s path=%s", op.get("name"), site_id, allowed, path)
 
     def operator_for(request: Request, site_id: str) -> dict:
         auth = request.headers.get("authorization", "")
@@ -59,7 +70,7 @@ def create_app(store: Store | None = None, devices: dict | None = None, operator
         if op is None:
             raise HTTPException(401, "unauthorized")
         if site_id not in op.get("sites", []):            # 객체 단위 권한 — 다른 사이트 조회 막기 (5단계 BOLA 시연의 '고친 쪽')
-            log.warning("forbidden site op=%s site=%s", op.get("name"), site_id)
+            record_cross_site(op, site_id, allowed=False, path=request.url.path)
             raise HTTPException(403, "forbidden")
         return op
 
@@ -107,6 +118,19 @@ def create_app(store: Store | None = None, devices: dict | None = None, operator
     def get_events(site_id: str, request: Request, minutes: int = 60):
         operator_for(request, site_id)
         return {"events": app.state.store.events(site_id, time.time() - max(1, min(minutes, 1440)) * 60)}
+
+    if app.state.vuln_bola:
+        # ── 취약한 경로 (시연용) ── 토큰이 '어떤 운전원'인지만 보고, 그 운전원이 이 사이트 담당인지는 안 본다.
+        # 주소의 site_id 만 바꾸면 남의 사이트 사건이 보인다 = BOLA (OWASP API Security Top 10 API1:2023).
+        @app.get("/api/v0/sites/{site_id}/events")
+        def get_events_vuln(site_id: str, request: Request, minutes: int = 60):
+            auth = request.headers.get("authorization", "")
+            op = app.state.operators.get(auth[7:].strip()) if auth.startswith("Bearer ") else None
+            if op is None:
+                raise HTTPException(401, "unauthorized")
+            if site_id not in op.get("sites", []):        # 막지는 않고(취약) 기록만 — 탐지는 되는데 피해는 이미 난 상태
+                record_cross_site(op, site_id, allowed=True, path=request.url.path)
+            return {"events": app.state.store.events(site_id, time.time() - max(1, min(minutes, 1440)) * 60)}
 
     @app.get("/api/v1/sites/{site_id}/detections")
     def get_detections(site_id: str, request: Request, minutes: int = 1440):
