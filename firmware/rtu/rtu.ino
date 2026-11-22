@@ -104,6 +104,7 @@ const uint32_t ENV_READ_MS = 2000;         // DHT22 는 2초, DHT11 은 1초에 
 const uint32_t FAKE_NET_MS   = 2000;
 const int      NET_BATCH_MAX = 10;         // 한 번에 보내는 사건 수 (서버 최대 50 · 본문 8KB)
 const uint32_t NET_BACKOFF_MAX_MS = 30000; // 실패하면 1초 → 2초 → … 30초까지 늘려 다시
+const uint32_t NET_KEEPALIVE_MS   = 30000; // 사건이 없을 때 이 간격으로 /healthz — TLS 연결을 열어 둠
 const uint32_t STAT_EVERY_MS = 10000;
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -125,6 +126,14 @@ volatile uint32_t netSent    = 0;         // 서버가 받은 사건 수 (가짜
 volatile uint32_t netFail    = 0;          // 실패한 전송 시도 수
 volatile uint32_t netLastMs  = 0;          // 마지막 전송에 걸린 시간 (TLS 연결 포함)
 volatile int      netLastStatus = 0;       // 마지막 HTTP 상태 (음수 = 연결 실패)
+#if NET_REAL
+extern volatile uint32_t netConnNew, netPings;
+#define NET_CONN_NEW netConnNew
+#define NET_PINGS netPings
+#else
+#define NET_CONN_NEW 0
+#define NET_PINGS 0
+#endif
 volatile int      levelNow   = -1;
 volatile float    tempNow    = NAN, humNow = NAN, motorNow = NAN;
 
@@ -184,13 +193,14 @@ void printStat() {
   // stack_free_B = 그 작업이 지금까지 가장 깊이 썼을 때 남은 바이트 (0 에 가까우면 넘칠 위험)
   Serial.printf("STAT mode=%s gap_max_ms process=%.1f input=%.1f level_cm=%d motor_c=%.1f room_c=%.1f room_hum_pct=%.1f"
                 " stack_free_B process=%u input=%u sound=%u sensor=%u net=%u console=%u env=%u"
-                " heap_free_B=%u net=%s net_sent=%u net_fail=%u net_last_ms=%u net_status=%d net_queue=%u\n",
+                " heap_free_B=%u net=%s net_sent=%u net_fail=%u net_last_ms=%u net_status=%d net_queue=%u net_conn_new=%u net_ping=%u\n",
                 NET_IN_LOOP ? "net_in_loop" : "tasks", gp / 1000.0, gi / 1000.0, levelNow, motorNow, tempNow, humNow,
                 (unsigned)uxTaskGetStackHighWaterMark(hProcess), (unsigned)uxTaskGetStackHighWaterMark(hInput),
                 (unsigned)uxTaskGetStackHighWaterMark(hSound), (unsigned)uxTaskGetStackHighWaterMark(hSensor),
                 (unsigned)uxTaskGetStackHighWaterMark(hNet), (unsigned)uxTaskGetStackHighWaterMark(hConsole), (unsigned)uxTaskGetStackHighWaterMark(hEnv),
                 (unsigned)ESP.getFreeHeap(), NET_REAL ? "real" : "fake", (unsigned)netSent, (unsigned)netFail,
-                (unsigned)netLastMs, netLastStatus, (unsigned)uxQueueMessagesWaiting(eventQ));
+                (unsigned)netLastMs, netLastStatus, (unsigned)uxQueueMessagesWaiting(eventQ),
+                (unsigned)NET_CONN_NEW, (unsigned)NET_PINGS);
   xSemaphoreGive(logMutex);
 }
 
@@ -650,69 +660,119 @@ void hmacHex(const char* prefix, const char* body, size_t bodyLen, char* outHex)
   outHex[64] = 0;
 }
 
+// 연결 재사용: TLS 핸드셰이크는 Wokwi 에서 11~12초 (Cloudflare 가 약 17초에 끊음 — 한계에 걸침).
+// 그래서 한 번 맺은 연결을 계속 쓴다 (HTTP keep-alive). 사건이 없을 때는 NET_KEEPALIVE_MS 마다 /healthz 로
+// 연결을 살려 둔다 — 서버 쪽에서는 "장치가 살아 있다"는 신호도 된다. 끊겨 있으면 버리고 새로 맺는다.
+WiFiClientSecure netSec;
+WiFiClient netPlain;
+HTTPClient netHttp;
+bool netClientReady = false;
+bool netTls = false;
+String netBase;                            // https://호스트 (끝의 / · 앞뒤 공백 정리)
+volatile uint32_t netConnNew = 0;          // 새로 맺은 연결 수 (재사용이 되면 거의 안 늘어남)
+volatile uint32_t netPings   = 0;          // 연결 유지 요청 성공 수
+
+void netSetupClient() {
+  if (netClientReady) return;
+  netBase = String(SERVER_URL);
+  netBase.trim();                          // 붙여 넣다 들어간 앞뒤 공백 (" https://…" 이면 begin 이 바로 실패: -100)
+  while (netBase.endsWith("/")) netBase.remove(netBase.length() - 1);
+  netTls = netBase.startsWith("https://");
+  if (netTls) {
+#if NET_TLS_INSECURE_TEST
+    netSec.setInsecure();                  // 진단용 (위 설명) — 제출 · 시연 코드에서는 0
+#else
+    netSec.setCACert(CA_ROOTS);            // 신뢰 목록(중간 인증서 WE1 + 루트)으로 서버 인증서 확인
+#endif
+    netSec.setHandshakeTimeout(30);        // 초 — 시뮬레이터(Wokwi)에서는 TLS 계산이 느림
+  }
+  netHttp.setReuse(true);                  // 응답 뒤에도 연결을 닫지 않음
+  netHttp.setConnectTimeout(20000);        // TCP 연결 + TLS 핸드셰이크까지
+  netHttp.setTimeout(15000);
+  netClientReady = true;
+}
+
+bool netConnected() {
+  return netTls ? netSec.connected() : netPlain.connected();
+}
+
+void netDropConnection() {
+  netHttp.end();
+  if (netTls) netSec.stop(); else netPlain.stop();
+}
+
+// 요청 한 번. body 가 nullptr 이면 GET. 돌려주는 값 = HTTP 상태 (음수 = 연결 실패)
+int netRequest(const char* path, const char* body, size_t len, const char* ts, const char* seq, const char* sig) {
+  netSetupClient();
+  bool fresh = !netConnected();            // 열린 연결이 없으면 이번에 새로 맺는다 (느림)
+  String url = netBase + path;
+  bool ok = netTls ? netHttp.begin(netSec, url) : netHttp.begin(netPlain, url);
+  if (!ok) {                               // 주소 형식 오류 — 연결도 안 해 봄. secrets.h 의 SERVER_URL 확인
+    netLog("NET 주소 형식 오류 — secrets.h 의 SERVER_URL 이 https://… 로 시작하는지 확인");
+    return -100;
+  }
+  netHttp.setUserAgent("reservoir-rtu/3");
+  int st;
+  if (body) {
+    netHttp.addHeader("Content-Type", "application/json");
+    netHttp.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
+    netHttp.addHeader("X-Timestamp", ts);
+    netHttp.addHeader("X-Seq", seq);
+    netHttp.addHeader("X-Signature", sig);
+    st = netHttp.POST((uint8_t*)body, len);
+  } else {
+    st = netHttp.GET();
+  }
+  if (st < 0) {                            // 연결 실패 원인을 시리얼에 — HTTPClient 오류 + TLS(mbedTLS) 오류
+    char e[100], m[200];
+    e[0] = 0;
+    int tlsErr = netTls ? netSec.lastError(e, sizeof(e)) : 0;
+    snprintf(m, sizeof(m), "NET 연결 오류 %s http=%s tls=%d %s heap=%u", fresh ? "(새 연결)" : "(재사용 연결)",
+             HTTPClient::errorToString(st).c_str(), tlsErr, e, (unsigned)ESP.getFreeHeap());
+    netLog(m);
+    netDropConnection();                   // 다음에는 새로 맺는다
+    return st;
+  }
+  if (fresh) netConnNew = netConnNew + 1;
+  netHttp.getString();                     // 응답 본문을 다 읽어야 같은 연결로 다음 요청 가능
+  netHttp.end();                           // setReuse(true) 라 연결은 열어 둠
+  return st;
+}
+
 // netBatch 를 한 번 보낸다. 돌려주는 값 = HTTP 상태 (음수 = 연결 실패)
 int netSendBatch() {
   size_t len = netBuildBody();
   unsigned long long seq = ++netSeq;       // 다시 보낼 때도 새 번호 · 새 시각 · 새 서명
   long ts = (long)time(nullptr);
-  char prefix[48], sig[65], hdr[24];
+  char prefix[48], sig[65], tsS[24], seqS[24];
   snprintf(prefix, sizeof(prefix), "%ld\n%llu\n", ts, seq);
   hmacHex(prefix, netBody, len, sig);
-
-  String url = String(SERVER_URL);
-  url.trim();                              // 붙여 넣다 들어간 앞뒤 공백 (" https://…" 이면 begin 이 바로 실패: -100)
-  while (url.endsWith("/")) url.remove(url.length() - 1);
-  url += String("/api/v1/sites/") + SITE_ID + "/events";
-  bool tls = url.startsWith("https://");
-  WiFiClientSecure sec;
-  WiFiClient plain;
-  if (tls) {
-#if NET_TLS_INSECURE_TEST
-    sec.setInsecure();                     // 진단용 (위 설명) — 제출 · 시연 코드에서는 0
-#else
-    sec.setCACert(CA_ROOTS);               // 루트 CA 로 서버 인증서 확인 (setInsecure 안 씀)
-#endif
-    sec.setHandshakeTimeout(30);           // 초 — 시뮬레이터(Wokwi)에서는 TLS 계산이 느림
-  }
-  HTTPClient http;
-  http.setConnectTimeout(20000);           // TCP 연결 + TLS 핸드셰이크까지 이 안에 (Wokwi 에서 8초는 부족했음: -1 · 17초)
-  http.setTimeout(15000);
+  snprintf(tsS, sizeof(tsS), "%ld", ts);
+  snprintf(seqS, sizeof(seqS), "%llu", seq);
+  String path = String("/api/v1/sites/") + SITE_ID + "/events";
   uint32_t t0 = millis();
-  bool ok = tls ? http.begin(sec, url) : http.begin(plain, url);
-  if (!ok) {                               // 주소 형식 오류 — 연결도 안 해 봄. secrets.h 의 SERVER_URL 확인
-    netLastStatus = -100;
-    netLog("NET 주소 형식 오류 — secrets.h 의 SERVER_URL 이 https://… 로 시작하는지 확인");
-    return -100;
-  }
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
-  snprintf(hdr, sizeof(hdr), "%ld", ts);
-  http.addHeader("X-Timestamp", hdr);
-  snprintf(hdr, sizeof(hdr), "%llu", seq);
-  http.addHeader("X-Seq", hdr);
-  http.addHeader("X-Signature", sig);
-  http.setUserAgent("reservoir-rtu/3");
-  int st = http.POST((uint8_t*)netBody, len);
+  int st = netRequest(path.c_str(), netBody, len, tsS, seqS, sig);
   netLastMs = millis() - t0;
-  if (st < 0) {                            // 연결 실패 원인을 시리얼에 — HTTPClient 오류 + TLS(mbedTLS) 오류
-    char e[100], m[200];
-    e[0] = 0;
-    int tlsErr = tls ? sec.lastError(e, sizeof(e)) : 0;
-    snprintf(m, sizeof(m), "NET 연결 오류 http=%s tls=%d %s heap=%u", HTTPClient::errorToString(st).c_str(), tlsErr, e,
-             (unsigned)ESP.getFreeHeap());
-    netLog(m);
-  }
-  http.end();
   netLastStatus = st;
   return st;
 }
 
+// 연결 유지 — 사건이 없을 때만. 실패하면 연결을 버리고 조용히 넘어감 (다음 사건 때 새로 맺음)
+void netKeepAlive() {
+  if (!netClientReady || !netConnected() || WiFi.status() != WL_CONNECTED) return;
+  int st = netRequest("/healthz", nullptr, 0, nullptr, nullptr, nullptr);
+  if (st == 200) netPings = netPings + 1;
+}
+
 void netTask(void*) {
   uint32_t backoff = 1000;
-  char m[112];
+  char m[128];
   for (;;) {
-    if (netBatchN == 0) {                  // 사건이 올 때까지 기다리고, 0.3초 동안 더 온 것은 묶는다
-      if (xQueueReceive(eventQ, &netBatch[0], portMAX_DELAY) != pdTRUE) continue;
+    if (netBatchN == 0) {                  // 사건을 기다리다 NET_KEEPALIVE_MS 동안 없으면 연결 유지 요청
+      if (xQueueReceive(eventQ, &netBatch[0], pdMS_TO_TICKS(NET_KEEPALIVE_MS)) != pdTRUE) {
+        netKeepAlive();
+        continue;
+      }
       netBatchN = 1;
     }
     while (netBatchN < NET_BATCH_MAX && xQueueReceive(eventQ, &netBatch[netBatchN], pdMS_TO_TICKS(300)) == pdTRUE) netBatchN++;
@@ -723,11 +783,13 @@ void netTask(void*) {
       continue;
     }
 
+    uint32_t connBefore = netConnNew;
     int st = netSendBatch();
     if (st == 200) {
       if (NET_TLS_INSECURE_TEST) netLog("NET 경고: 인증서 확인 꺼짐(NET_TLS_INSECURE_TEST 1) — 진단 끝나면 0 으로");
       netSent = netSent + netBatchN;
-      snprintf(m, sizeof(m), "NET 보냄 %d건 status=200 %ums", netBatchN, (unsigned)netLastMs);
+      snprintf(m, sizeof(m), "NET 보냄 %d건 status=200 %ums (%s)", netBatchN, (unsigned)netLastMs,
+               netConnNew != connBefore ? "새 연결" : "연결 재사용");
       netLog(m);
       netBatchN = 0;
       backoff = 1000;

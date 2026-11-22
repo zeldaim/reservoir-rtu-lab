@@ -70,7 +70,7 @@ ESP32 원격감시 장치(Wokwi 시뮬레이터)와, 그 장치를 지키는 관
 5. 확인: `docker compose logs api` — 거절은 이유가 로그에만 남는다 (`bad_signature` · `stale_timestamp` · `replayed_seq` …)
 6. 다 쓰면 터널 닫기: `docker compose --profile tunnel stop tunnel`
 
-장치 쪽 동작: 사건을 0.3초 모아 최대 10건씩 보냄 · 실패(401 · 429 · 5xx · 연결)는 그 묶음을 들고 1→2→…30초 간격으로 다시 · 다시 보내도 안 되는 거절(400 · 403 · 409 · 413)은 버림(장치 `log` 에는 남음) · 보낼 때마다 새 번호 · 새 시각 · 새 서명. 서버 인증서는 `ca_roots.h` 의 루트 CA 로 확인 (`setInsecure` 안 씀, 다시 만들기 `python server/tools/make_ca_roots.py`).
+장치 쪽 동작: 사건을 0.3초 모아 최대 10건씩 보냄 · 실패(401 · 429 · 5xx · 연결)는 그 묶음을 들고 1→2→…30초 간격으로 다시 · 다시 보내도 안 되는 거절(400 · 403 · 409 · 413)은 버림(장치 `log` 에는 남음) · 보낼 때마다 새 번호 · 새 시각 · 새 서명. **연결 재사용:** Wokwi 에서 TLS 핸드셰이크가 11~12초(Cloudflare 가 약 17초에 끊음)라 한 번 맺은 연결을 계속 쓰고, 사건이 없으면 30초마다 `/healthz` 로 연결을 살려 둠 — STAT `net_conn_new`(새 연결 수) · `net_ping`(유지 요청 수)로 확인. 신뢰 목록 앞에 중간 인증서 WE1 을 넣어 무거운 P-384 확인을 건너뜀. 서버 인증서는 `ca_roots.h` 의 루트 CA 로 확인 (`setInsecure` 안 씀, 다시 만들기 `python server/tools/make_ca_roots.py`).
 
 ## 알려 둘 제약
 - 이 PC 는 Windows 애플리케이션 제어 정책이 ESP32 컴파일러를 막는다 — 컴파일 · 실행은 Wokwi 에서 한다 (2026-11-22 실행 확인, 측정값은 `docs/개발문서_초안.md` 3.2).
