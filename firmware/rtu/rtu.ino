@@ -103,8 +103,9 @@ const int LOG_MAX = 50;
 Event logBuf[LOG_MAX];
 int logCount = 0, logHead = 0;
 
-void fakeNetworkSend(const Event& e) {     // 3단계: 서버로 HTTP POST (서명 포함)
-  (void)e;
+// 주의: Arduino 는 함수 선언을 파일 맨 위에 자동으로 만들어 넣는다 — 그래서 함수 인자에 이 파일의 struct(Event 등)를
+// 쓰면 'does not name a type' 오류가 난다. 인자에는 기본 타입만 쓰고, 기본값 인자(= 1)도 쓰지 않는다.
+void fakeNetworkSend() {                   // 3단계: 서버로 HTTP POST (서명 포함) — 그때 보낼 사건을 큐에서 꺼내 넘긴다
   vTaskDelay(pdMS_TO_TICKS(FAKE_NET_MS));
   netSent = netSent + 1;                   // net 작업만 씀 (volatile 에 ++ 는 경고)
 }
@@ -124,7 +125,7 @@ void logEvent(const char* type, const char* detail) {
   xSemaphoreGive(logMutex);
 
 #if NET_IN_LOOP
-  fakeNetworkSend(e);                      // 1단계 구조: 부른 작업이 전송 끝날 때까지 멈춤
+  fakeNetworkSend();                       // 1단계 구조: 부른 작업이 전송 끝날 때까지 멈춤
 #else
   if (xQueueSend(eventQ, &e, 0) != pdTRUE) {   // 큐가 차면 기다리지 않음 (제어가 우선)
     xSemaphoreTake(logMutex, portMAX_DELAY);
@@ -172,7 +173,7 @@ void showLine(int row, const char* text) {
   xSemaphoreGive(lcdMutex);
 }
 
-void sound(uint16_t freq, uint16_t ms, uint8_t count = 1) {
+void sound(uint16_t freq, uint16_t ms, uint8_t count) {
   Sound s = {freq, ms, count};
   xQueueSend(soundQ, &s, 0);
 }
@@ -345,7 +346,7 @@ void onWrongPassword(uint32_t now) {
     logEvent("LOCKOUT", d);
     sound(1000, 150, 3);
   } else {
-    sound(300, 300);
+    sound(300, 300, 1);
     char l1[17];
     snprintf(l1, sizeof(l1), "DENIED %d/%d", n, FAIL_LIMIT);
     showLine(0, l1);
@@ -354,11 +355,11 @@ void onWrongPassword(uint32_t now) {
 }
 
 void onKey(int key, uint32_t now) {
-  if (state == LOCKOUT) { logEvent("KEY_LOCKED", "input during lockout"); sound(200, 80); return; }
+  if (state == LOCKOUT) { logEvent("KEY_LOCKED", "input during lockout"); sound(200, 80, 1); return; }
   if (state == OPEN) return;
   if (msgUntil) { msgUntil = 0; digitalWrite(PIN_LED_NG, LOW); }
 
-  sound(1500, 30);
+  sound(1500, 30, 1);
   input[inputLen++] = '0' + key;
   input[inputLen] = '\0';
   showInput();
@@ -373,7 +374,7 @@ void onKey(int key, uint32_t now) {
     logEvent("OPEN", "pin ok");
     door.write(90);
     digitalWrite(PIN_LED_OK, HIGH);
-    sound(2000, 100);
+    sound(2000, 100, 1);
     showLine(0, "DOOR OPEN");
   } else {
     onWrongPassword(now);
@@ -475,7 +476,7 @@ void sensorTask(void*) {
 void netTask(void*) {
   Event e;
   for (;;) {
-    if (xQueueReceive(eventQ, &e, portMAX_DELAY) == pdTRUE) fakeNetworkSend(e);
+    if (xQueueReceive(eventQ, &e, portMAX_DELAY) == pdTRUE) fakeNetworkSend();
   }
 }
 
