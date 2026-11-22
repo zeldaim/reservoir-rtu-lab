@@ -4,6 +4,7 @@
 #   docker compose --profile tunnel up -d tunnel    인터넷 임시 주소 열기 (시연 · 시험 때만!)
 #   docker compose logs tunnel | grep trycloudflare  → 그 주소를 secrets.h 의 SERVER_URL 에
 #   docker compose --profile tunnel stop tunnel     다 쓰면 닫기
+name: rtu   # 프로젝트 이름 고정 — 어느 명령으로 띄워도 같은 서버 · 같은 DB (폴더 이름 'server' 로 두 벌 뜨며 8090 충돌하던 것 방지)
 services:
   api:
     build: .
