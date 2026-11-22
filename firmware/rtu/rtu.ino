@@ -660,10 +660,13 @@ int netSendBatch() {
   bool tls = url.startsWith("https://");
   WiFiClientSecure sec;
   WiFiClient plain;
-  if (tls) sec.setCACert(CA_ROOTS);        // 루트 CA 로 서버 인증서 확인 (setInsecure 안 씀)
+  if (tls) {
+    sec.setCACert(CA_ROOTS);               // 루트 CA 로 서버 인증서 확인 (setInsecure 안 씀)
+    sec.setHandshakeTimeout(30);           // 초 — 시뮬레이터(Wokwi)에서는 TLS 계산이 느림
+  }
   HTTPClient http;
-  http.setConnectTimeout(8000);
-  http.setTimeout(10000);
+  http.setConnectTimeout(20000);           // TCP 연결 + TLS 핸드셰이크까지 이 안에 (Wokwi 에서 8초는 부족했음: -1 · 17초)
+  http.setTimeout(15000);
   uint32_t t0 = millis();
   bool ok = tls ? http.begin(sec, url) : http.begin(plain, url);
   if (!ok) {                               // 주소 형식 오류 — 연결도 안 해 봄. secrets.h 의 SERVER_URL 확인
@@ -680,8 +683,16 @@ int netSendBatch() {
   http.addHeader("X-Signature", sig);
   http.setUserAgent("reservoir-rtu/3");
   int st = http.POST((uint8_t*)netBody, len);
-  http.end();
   netLastMs = millis() - t0;
+  if (st < 0) {                            // 연결 실패 원인을 시리얼에 — HTTPClient 오류 + TLS(mbedTLS) 오류
+    char e[100], m[200];
+    e[0] = 0;
+    int tlsErr = tls ? sec.lastError(e, sizeof(e)) : 0;
+    snprintf(m, sizeof(m), "NET 연결 오류 http=%s tls=%d %s heap=%u", HTTPClient::errorToString(st).c_str(), tlsErr, e,
+             (unsigned)ESP.getFreeHeap());
+    netLog(m);
+  }
+  http.end();
   netLastStatus = st;
   return st;
 }
