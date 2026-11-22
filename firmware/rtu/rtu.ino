@@ -13,7 +13,8 @@
 //   process 우선순위 4  수위 측정 · 밸브 · 펌프 · 공정 경보 · 모터 과열 인터록(LM35 70°C)   ← 제일 중요 (안전)
 //   input   우선순위 3  버튼 · 출입 상태 · LCD 1줄
 //   sound   우선순위 3  부저
-//   sensor  우선순위 2  PIR 침입 감지 · 설비실 온습도(DHT: 40°C↑ 과열 · 85%↑ 결로/침수)
+//   sensor  우선순위 2  PIR 침입 감지
+//   env     우선순위 1  설비실 온습도(DHT: 40°C↑ 과열 · 85%↑ 결로/침수) — **코어 0** (읽는 동안 인터럽트를 막아서)
 //   net     우선순위 1  사건 전송 (지금은 2초 걸리는 가짜 전송 · 3단계에서 실제 HTTP)
 //   console 우선순위 1  시리얼 명령(log · stat) · 10초마다 STAT
 //
@@ -89,7 +90,7 @@ struct Sound { uint16_t freq; uint16_t ms; uint8_t count; };
 
 QueueHandle_t eventQ, soundQ;
 SemaphoreHandle_t lcdMutex, logMutex;
-TaskHandle_t hProcess, hInput, hSound, hSensor, hNet, hConsole;
+TaskHandle_t hProcess, hInput, hSound, hSensor, hNet, hConsole, hEnv;
 
 volatile uint32_t lastAuthAt = 0;          // input 이 쓰고 sensor 가 읽음 (0 = 아직 없음)
 volatile bool     doorOpen   = false;
@@ -153,12 +154,12 @@ void printStat() {
   xSemaphoreTake(logMutex, portMAX_DELAY);
   // stack_free_B = 그 작업이 지금까지 가장 깊이 썼을 때 남은 바이트 (0 에 가까우면 넘칠 위험)
   Serial.printf("STAT mode=%s gap_max_ms process=%.1f input=%.1f level_cm=%d motor_c=%.1f room_c=%.1f room_hum_pct=%.1f"
-                " stack_free_B process=%u input=%u sound=%u sensor=%u net=%u console=%u"
+                " stack_free_B process=%u input=%u sound=%u sensor=%u net=%u console=%u env=%u"
                 " heap_free_B=%u net_sent=%u net_queue=%u\n",
                 NET_IN_LOOP ? "net_in_loop" : "tasks", gp / 1000.0, gi / 1000.0, levelNow, motorNow, tempNow, humNow,
                 (unsigned)uxTaskGetStackHighWaterMark(hProcess), (unsigned)uxTaskGetStackHighWaterMark(hInput),
                 (unsigned)uxTaskGetStackHighWaterMark(hSound), (unsigned)uxTaskGetStackHighWaterMark(hSensor),
-                (unsigned)uxTaskGetStackHighWaterMark(hNet), (unsigned)uxTaskGetStackHighWaterMark(hConsole),
+                (unsigned)uxTaskGetStackHighWaterMark(hNet), (unsigned)uxTaskGetStackHighWaterMark(hConsole), (unsigned)uxTaskGetStackHighWaterMark(hEnv),
                 (unsigned)ESP.getFreeHeap(), (unsigned)netSent, (unsigned)uxQueueMessagesWaiting(eventQ));
   xSemaphoreGive(logMutex);
 }
@@ -432,17 +433,30 @@ void inputTask(void*) {
   }
 }
 
-// ── sensor 작업: PIR 침입 감지 · 설비실 온습도 ───────
+// ── env 작업 (코어 0): 설비실 온습도 ─────────────────
+// DHT 는 마이크로초 단위 타이밍으로 읽어서, 읽는 동안 라이브러리가 인터럽트를 막는다. 처음에는 sensor 작업(코어 1)에서
+// 읽었더니 Wokwi 실측에서 ① 읽기가 8초마다 실패하고 ② 같은 코어의 공정 작업이 최대 0.41초(원래 0.2초 주기),
+// 입력 작업이 0.16초(원래 0.005초) 멈췄다. 그래서 제어 작업이 없는 코어 0 의 따로 작업으로 옮겼다.
+// 3단계 Wi-Fi 도 코어 0 에서 돌아서, 그때 다시 잰다.
+const int DHT_FAIL_LOG_AFTER = 3;          // 연속 실패가 이만큼일 때만 SENSOR_ERR (한두 번은 흔하다)
+
 void checkEnvironment() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
+  static int fails = 0;
   static bool errActive = false, hotActive = false, humidActive = false;
   char d[32];
   if (isnan(t) || isnan(h)) {
-    if (!errActive) logEvent("SENSOR_ERR", "dht read failed");   // 들어갈 때 한 번
-    errActive = true;
+    fails++;
+    if (fails == DHT_FAIL_LOG_AFTER) {
+      snprintf(d, sizeof(d), "dht %d reads failed", fails);
+      logEvent("SENSOR_ERR", d);
+      errActive = true;
+    }
     return;
   }
+  if (errActive) logEvent("SENSOR_OK", "dht recovered");
+  fails = 0;
   errActive = false;
   tempNow = t; humNow = h;
   bool hot = t >= ENV_HOT_C, humid = h >= ENV_HUMID_PCT;
@@ -451,11 +465,17 @@ void checkEnvironment() {
   hotActive = hot; humidActive = humid;
 }
 
+void envTask(void*) {
+  for (;;) {
+    checkEnvironment();
+    vTaskDelay(pdMS_TO_TICKS(ENV_READ_MS));
+  }
+}
+
+// ── sensor 작업: PIR 침입 감지 ───────────────────────
 void sensorTask(void*) {
   bool lastMotion = false;
-  uint32_t lastEnv = 0;
   for (;;) {
-    if (millis() - lastEnv >= ENV_READ_MS) { lastEnv = millis(); checkEnvironment(); }
     bool motion = digitalRead(PIN_PIR) == HIGH;
     if (motion && !lastMotion) {           // 움직임이 새로 시작될 때 한 번 판단
       uint32_t now = millis(), auth = lastAuthAt;
@@ -530,13 +550,14 @@ void setup() {
   logEvent("BOOT", NET_IN_LOOP ? "mode net_in_loop" : "mode tasks");
   Serial.println("시리얼 명령: log = 사고 기록 전체 · stat = 지금 측정값 (10초마다 자동)");
 
-  // 전부 코어 1 — 한 코어를 우선순위로 나눠 쓰는 걸 보이려고
+  // 제어 작업은 전부 코어 1 — 한 코어를 우선순위로 나눠 쓰는 걸 보이려고. DHT 만 코어 0
   xTaskCreatePinnedToCore(processTask, "process", 4096, nullptr, 4, &hProcess, 1);
   xTaskCreatePinnedToCore(inputTask,   "input",   4096, nullptr, 3, &hInput,   1);
   xTaskCreatePinnedToCore(soundTask,   "sound",   2048, nullptr, 3, &hSound,   1);
   xTaskCreatePinnedToCore(sensorTask,  "sensor",  3072, nullptr, 2, &hSensor,  1);
   xTaskCreatePinnedToCore(netTask,     "net",     4096, nullptr, 1, &hNet,     1);
   xTaskCreatePinnedToCore(consoleTask, "console", 4096, nullptr, 1, &hConsole, 1);
+  xTaskCreatePinnedToCore(envTask,     "env",     3072, nullptr, 1, &hEnv,     0);   // DHT 는 코어 0 (위 설명)
 }
 
 void loop() {
