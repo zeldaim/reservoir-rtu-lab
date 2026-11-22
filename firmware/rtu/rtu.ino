@@ -36,6 +36,12 @@
 #define NET_IN_LOOP 0
 #endif
 
+// 진단용: 1 이면 서버 인증서 확인을 끔(setInsecure). TLS 가 느린 원인이 인증서 체인 확인인지 가르는 한 번짜리 시험.
+// 끝나면 반드시 0 으로 — 확인을 끄면 가짜 서버에 사건을 보내도 모른다 (서명 · 일련번호는 그대로라 위조 · 재전송은 막힘)
+#ifndef NET_TLS_INSECURE_TEST
+#define NET_TLS_INSECURE_TEST 0
+#endif
+
 // 3단계: secrets.h(provision.py 가 만듦 · git 에 안 올라감)가 있으면 서버로 실제 전송.
 // 없으면 2초 가짜 전송 — 비밀값 없이도 2단계 실험은 그대로 돈다. NET_IN_LOOP 1 비교 모드도 가짜 전송을 쓴다
 // (제어 작업 스택 3~4KB 로는 TLS 가 안 돌아서 — 대신 실제 전송 시간을 STAT net_last_ms 로 재서 2초와 비교).
@@ -661,7 +667,11 @@ int netSendBatch() {
   WiFiClientSecure sec;
   WiFiClient plain;
   if (tls) {
+#if NET_TLS_INSECURE_TEST
+    sec.setInsecure();                     // 진단용 (위 설명) — 제출 · 시연 코드에서는 0
+#else
     sec.setCACert(CA_ROOTS);               // 루트 CA 로 서버 인증서 확인 (setInsecure 안 씀)
+#endif
     sec.setHandshakeTimeout(30);           // 초 — 시뮬레이터(Wokwi)에서는 TLS 계산이 느림
   }
   HTTPClient http;
@@ -715,6 +725,7 @@ void netTask(void*) {
 
     int st = netSendBatch();
     if (st == 200) {
+      if (NET_TLS_INSECURE_TEST) netLog("NET 경고: 인증서 확인 꺼짐(NET_TLS_INSECURE_TEST 1) — 진단 끝나면 0 으로");
       netSent = netSent + netBatchN;
       snprintf(m, sizeof(m), "NET 보냄 %d건 status=200 %ums", netBatchN, (unsigned)netLastMs);
       netLog(m);
