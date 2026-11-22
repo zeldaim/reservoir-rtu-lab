@@ -10,10 +10,10 @@
 // 왜 FreeRTOS 로 나누나: 3단계에서 사건을 서버로 보내면 통신(1~3초) 동안 loop() 하나짜리 구조는
 // 버튼 · 침입 감지 · **수위 제어까지 멈춘다** — 물이 넘쳐도 밸브를 못 연다. 그래서:
 //
-//   process 우선순위 4  수위 측정 · 밸브 · 펌프 · 공정 경보   ← 제일 중요 (안전)
+//   process 우선순위 4  수위 측정 · 밸브 · 펌프 · 공정 경보 · 모터 과열 인터록(LM35 70°C)   ← 제일 중요 (안전)
 //   input   우선순위 3  버튼 · 출입 상태 · LCD 1줄
 //   sound   우선순위 3  부저
-//   sensor  우선순위 2  PIR 침입 감지
+//   sensor  우선순위 2  PIR 침입 감지 · 설비실 온습도(DHT: 40°C↑ 과열 · 85%↑ 결로/침수)
 //   net     우선순위 1  사건 전송 (지금은 2초 걸리는 가짜 전송 · 3단계에서 실제 HTTP)
 //   console 우선순위 1  시리얼 명령(log · stat) · 10초마다 STAT
 //
@@ -24,6 +24,12 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <ESP32Servo.h>
+#include <DHT.h>                           // Adafruit DHT sensor library (수업 11주차 온습도 센서)
+
+// Wokwi 에는 DHT22 만 있다 — 실물 DHT11 이면 DHT11 로 바꾼다 (배선 · 코드는 같음)
+#ifndef DHT_TYPE
+#define DHT_TYPE DHT22
+#endif
 
 #ifndef NET_IN_LOOP
 #define NET_IN_LOOP 0
@@ -38,6 +44,8 @@ const int PIN_BUZZER  = 19;
 const int PIN_TRIG    = 5;                 // 수위계 (초음파)
 const int PIN_ECHO    = 17;
 const int PIN_PIR     = 33;                // 침입 감지
+const int PIN_DHT     = 16;                // 설비실 온습도 (DHT)
+const int PIN_LM35    = 34;                // 펌프 모터 온도 (LM35 · Wokwi 에선 가변저항). ADC1 핀 — ADC2 는 Wi-Fi 와 충돌
 const int PIN_LED_OK  = 25;
 const int PIN_LED_NG  = 26;
 
@@ -60,12 +68,20 @@ const int LEVEL_HH      = 190;             // 넘침 경보
 const int LEVEL_LL      = 20;              // 고갈 경보
 const int JUMP_CM_PER_S = 30;              // 1초에 이만큼 넘게 변하면 이상
 const uint32_t PROCESS_MS = 200;
+const float MOTOR_HOT_C   = 70.0;          // 인터록: 펌프 모터가 이 위면 펌프 강제 정지
+const float MOTOR_RESET_C = 60.0;          //   이 아래로 식어야 다시 돌 수 있음 (히스테리시스)
+
+// ── 설비실 환경 설정 ─────────────────────────────────
+const float ENV_HOT_C      = 40.0;         // 이 위면 설비(펌프 · 제어반) 과열 위험
+const float ENV_HUMID_PCT  = 85.0;         // 이 위면 결로 · 침수 의심
+const uint32_t ENV_READ_MS = 2000;         // DHT22 는 2초, DHT11 은 1초에 한 번까지
 
 const uint32_t FAKE_NET_MS   = 2000;
 const uint32_t STAT_EVERY_MS = 10000;
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 Servo door, valve;
+DHT dht(PIN_DHT, DHT_TYPE);
 
 // ── 작업 사이 통로 ───────────────────────────────────
 struct Event { uint32_t ms; char type[12]; char detail[32]; };
@@ -80,6 +96,7 @@ volatile bool     doorOpen   = false;
 volatile uint32_t gapInputUs = 0, gapProcessUs = 0;
 volatile uint32_t netSent    = 0;
 volatile int      levelNow   = -1;
+volatile float    tempNow    = NAN, humNow = NAN, motorNow = NAN;
 
 // ── 사고 기록 ────────────────────────────────────────
 const int LOG_MAX = 50;
@@ -134,10 +151,10 @@ void printStat() {
   gapInputUs = 0; gapProcessUs = 0;
   xSemaphoreTake(logMutex, portMAX_DELAY);
   // stack_free_B = 그 작업이 지금까지 가장 깊이 썼을 때 남은 바이트 (0 에 가까우면 넘칠 위험)
-  Serial.printf("STAT mode=%s gap_max_ms process=%.1f input=%.1f level_cm=%d"
+  Serial.printf("STAT mode=%s gap_max_ms process=%.1f input=%.1f level_cm=%d motor_c=%.1f room_c=%.1f room_hum_pct=%.1f"
                 " stack_free_B process=%u input=%u sound=%u sensor=%u net=%u console=%u"
                 " heap_free_B=%u net_sent=%u net_queue=%u\n",
-                NET_IN_LOOP ? "net_in_loop" : "tasks", gp / 1000.0, gi / 1000.0, levelNow,
+                NET_IN_LOOP ? "net_in_loop" : "tasks", gp / 1000.0, gi / 1000.0, levelNow, motorNow, tempNow, humNow,
                 (unsigned)uxTaskGetStackHighWaterMark(hProcess), (unsigned)uxTaskGetStackHighWaterMark(hInput),
                 (unsigned)uxTaskGetStackHighWaterMark(hSound), (unsigned)uxTaskGetStackHighWaterMark(hSensor),
                 (unsigned)uxTaskGetStackHighWaterMark(hNet), (unsigned)uxTaskGetStackHighWaterMark(hConsole),
@@ -188,8 +205,14 @@ long readDistanceCm() {
   return us == 0 ? -1 : us / 58;
 }
 
+// LM35: 1°C 당 10mV. analogReadMilliVolts 는 ESP32 가 보정한 mV (우노라면 analogRead()*5.0/1024*100)
+float readMotorTempC() {
+  return analogReadMilliVolts(PIN_LM35) / 10.0;
+}
+
 void processTask(void*) {
   bool valveOpen = false, pumpOn = false;
+  bool interlock = false;                  // 모터 과열로 펌프 강제 정지 중
   bool hhActive = false, llActive = false, sensorErr = false;
   int lastLevel = -1;
   uint32_t lastLevelAt = 0;
@@ -204,6 +227,8 @@ void processTask(void*) {
     if (dist < 0) {
       if (!sensorErr) logEvent("SENSOR_ERR", "level sensor no echo");   // 들어갈 때 한 번
       sensorErr = true;
+      digitalWrite(PIN_PUMP, LOW);         // 안전 쪽으로: 수위를 모르면 펌프를 끈다 (넘침 방지)
+      showLine(1, "LEVEL SENSOR ERR");
     } else {
       sensorErr = false;
       int level = constrain(TANK_CM - (int)dist, 0, TANK_CM);
@@ -229,8 +254,22 @@ void processTask(void*) {
         snprintf(d, sizeof(d), "L%d valve shut pump on", level);
         logEvent("CONTROL", d);
       }
+      // 인터록: 모터가 뜨거우면 제어 판단과 상관없이 펌프를 끈다 (식을 때까지)
+      float motor = readMotorTempC();
+      motorNow = motor;
+      if (!interlock && motor >= MOTOR_HOT_C) {
+        interlock = true;
+        snprintf(d, sizeof(d), "motor %.0fC pump forced off", motor);
+        logEvent("INTERLOCK", d);
+        sound(1500, 400, 3);
+      } else if (interlock && motor <= MOTOR_RESET_C) {
+        interlock = false;
+        snprintf(d, sizeof(d), "motor %.0fC pump allowed", motor);
+        logEvent("INTERLOCK", d);
+      }
+
       valve.write(valveOpen ? 90 : 0);
-      digitalWrite(PIN_PUMP, pumpOn ? HIGH : LOW);
+      digitalWrite(PIN_PUMP, (pumpOn && !interlock) ? HIGH : LOW);
 
       // 공정 경보 (들어갈 때 한 번)
       if (level >= LEVEL_HH && !hhActive) {
@@ -247,7 +286,8 @@ void processTask(void*) {
       llActive = level <= LEVEL_LL;
 
       char l2[17];
-      snprintf(l2, sizeof(l2), "L%3d V%s P%s", level, valveOpen ? "OPN" : "SHT", pumpOn ? "ON" : "OF");
+      snprintf(l2, sizeof(l2), "L%3d V%s P%s", level, valveOpen ? "OPN" : "SHT",
+               interlock ? "IL" : (pumpOn ? "ON" : "OF"));       // IL = 인터록으로 정지
       showLine(1, l2);
     }
     vTaskDelay(pdMS_TO_TICKS(PROCESS_MS));
@@ -391,10 +431,30 @@ void inputTask(void*) {
   }
 }
 
-// ── sensor 작업: PIR 침입 감지 ───────────────────────
+// ── sensor 작업: PIR 침입 감지 · 설비실 온습도 ───────
+void checkEnvironment() {
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  static bool errActive = false, hotActive = false, humidActive = false;
+  char d[32];
+  if (isnan(t) || isnan(h)) {
+    if (!errActive) logEvent("SENSOR_ERR", "dht read failed");   // 들어갈 때 한 번
+    errActive = true;
+    return;
+  }
+  errActive = false;
+  tempNow = t; humNow = h;
+  bool hot = t >= ENV_HOT_C, humid = h >= ENV_HUMID_PCT;
+  if (hot && !hotActive)     { snprintf(d, sizeof(d), "room %.1fC overheat", t); logEvent("ENV_HOT", d);   sound(1200, 200, 2); }
+  if (humid && !humidActive) { snprintf(d, sizeof(d), "room %.0f%% humid", h);    logEvent("ENV_HUMID", d); sound(900, 200, 2); }
+  hotActive = hot; humidActive = humid;
+}
+
 void sensorTask(void*) {
   bool lastMotion = false;
+  uint32_t lastEnv = 0;
   for (;;) {
+    if (millis() - lastEnv >= ENV_READ_MS) { lastEnv = millis(); checkEnvironment(); }
     bool motion = digitalRead(PIN_PIR) == HIGH;
     if (motion && !lastMotion) {           // 움직임이 새로 시작될 때 한 번 판단
       uint32_t now = millis(), auth = lastAuthAt;
@@ -455,6 +515,8 @@ void setup() {
   valve.attach(PIN_VALVE);
   door.write(0);
   valve.write(0);
+  analogSetPinAttenuation(PIN_LM35, ADC_11db);   // 0~3.3V 범위로 읽기
+  dht.begin();
   Wire.begin(21, 22);
   lcd.init();
   lcd.backlight();

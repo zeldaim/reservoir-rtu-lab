@@ -13,6 +13,8 @@
     { "type": "wokwi-buzzer", "id": "bz", "top": 170, "left": -220, "attrs": { "volume": "0.3" } },
     { "type": "wokwi-hc-sr04", "id": "level", "top": -170, "left": 200, "attrs": { "distance": "100" } },
     { "type": "wokwi-pir-motion-sensor", "id": "pir", "top": -170, "left": 420, "attrs": {} },
+    { "type": "wokwi-dht22", "id": "dht", "top": -170, "left": 560, "attrs": { "temperature": "25", "humidity": "50" } },
+    { "type": "wokwi-potentiometer", "id": "lm35", "top": 180, "left": -330, "attrs": { "value": "80" } },
     { "type": "wokwi-lcd1602", "id": "lcd", "top": -20, "left": 260, "attrs": { "pins": "i2c" } },
     { "type": "wokwi-led", "id": "ledok", "top": 60, "left": -170, "attrs": { "color": "green" } },
     { "type": "wokwi-led", "id": "ledng", "top": 60, "left": -120, "attrs": { "color": "red" } },
@@ -52,6 +54,14 @@
     [ "pir:VCC", "esp:5V", "red", [] ],
     [ "pir:OUT", "esp:33", "violet", [] ],
     [ "pir:GND", "esp:GND.2", "black", [] ],
+
+    [ "dht:VCC", "esp:3V3", "red", [] ],
+    [ "dht:SDA", "esp:16", "green", [] ],
+    [ "dht:GND", "esp:GND.2", "black", [] ],
+
+    [ "lm35:VCC", "esp:3V3", "red", [] ],
+    [ "lm35:SIG", "esp:34", "orange", [] ],
+    [ "lm35:GND", "esp:GND.1", "black", [] ],
 
     [ "lcd:VCC", "esp:5V", "red", [] ],
     [ "lcd:GND", "esp:GND.2", "black", [] ],
