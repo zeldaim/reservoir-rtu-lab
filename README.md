@@ -40,7 +40,7 @@ ESP32 원격감시 장치(Wokwi 시뮬레이터)와, 그 장치를 지키는 관
 |---|---|---|
 | 1 | 출입통제 본체 (`firmware/doorlock`): PIN · 레이트 리밋 잠금 · 배회 감지 · 사건 기록 | 코드 완료 · 출입통제 동작은 RTU 안에서 Wokwi 확인(PIN · 5회 잠금 · INTRUSION/MOTION), 단독 `doorlock` 스케치는 따로 안 돌림 |
 | 2 | **RTU + FreeRTOS 작업 분리** (`firmware/rtu`): 공정 제어 추가, 통신 중에도 제어 · 입력이 멈추지 않게. 분리 전 · 후 간격 측정 (`NET_IN_LOOP`) | Wokwi 컴파일 · 실행 완료(2026-11-22) — DHT 코어 0 이동(입력 간격 120~197 → 11~12 ms), vTaskDelayUntil(공정 주기 261 → 200 ms). `NET_IN_LOOP` 0/1 비교 표는 아직 |
-| 3 | 관제 서버 + 사건 전송(HMAC 서명) + AI 사고 리포트 (AI API 키는 서버에만) | |
+| 3 | 관제 서버 + 사건 전송(HMAC 서명) + AI 사고 리포트 (AI API 키는 서버에만) | 서버 완료(가짜 장치로 200 · 같은 번호 다시 보내기 409 확인) · 펌웨어 실제 전송 코드 완료 · **Wokwi ↔ 서버 연결 미확인** |
 | 4 | 서버 ML — 레이트 리밋 아래 느린 무차별 대입 · 공정값 이상(설정값 조작) 탐지, 레이트 리밋과 비교 표. **정상 패턴은 실제 K-water 공공데이터로 학습** — 데이터 계층은 별도 공개 레포 [aquaflow-pipeline](https://github.com/zeldaim/aquaflow-pipeline) (수집 → ORC → DuckDB 얇은 버전) · 센서 값 재생 · 저장 전 품질 검증(조작 값 · 학습 데이터 오염 방지) | |
 | 5 | API 보안 — 사이트 A 계정으로 사이트 B 조회 · 제어(BOLA) 시연 → 수정 → 탐지 · 원격 명령 레이트 리밋 | |
 | 6 | API-BOM (명세 + 관측 트래픽 → API 목록 · 숨은 API) · 명세에서 탐지 룰 자동 생성 · CI 룰 시험 | |
@@ -59,6 +59,18 @@ ESP32 원격감시 장치(Wokwi 시뮬레이터)와, 그 장치를 지키는 관
   - 시리얼: `log` = 사고 기록 · `stat` = 작업별 간격 · 스택 여유
   - 비교: 코드 맨 위 `#define NET_IN_LOOP 0` 을 `1` 로 바꾸면 1단계 구조(전송 중 멈춤)
 - **컴파일 (로컬):** `arduino-cli compile --fqbn esp32:esp32:esp32 firmware/rtu`
+
+## 실행 (단계 3 — 장치 → 서버)
+1. 비밀값 (처음 한 번): `python server/tools/provision.py` → `server/.env` · `firmware/rtu/secrets.h` (둘 다 git 에 안 올라감)
+2. 서버: `cd server && docker compose up -d --build` → `curl http://127.0.0.1:8090/healthz`
+3. 터널 (시험할 때만): `docker compose --profile tunnel up -d tunnel` → `docker compose logs tunnel | grep trycloudflare` 의 주소를 `secrets.h` 의 `SERVER_URL` 에
+4. Wokwi: 기존 탭에 **`secrets.h` · `ca_roots.h` 탭 추가** → ▶. 시리얼에 `NET wifi 연결` → `NET 보냄 N건 status=200 …ms`
+   - `secrets.h` 탭이 없으면 2단계처럼 가짜 전송 (`STAT … net=fake`)
+   - **`secrets.h` 를 넣은 채로 Wokwi 프로젝트를 저장하지 않는다** (Wokwi 프로젝트는 링크로 남에게 보일 수 있음). 저장했다면 `provision.py --force` 로 새로 만든다
+5. 확인: `docker compose logs api` — 거절은 이유가 로그에만 남는다 (`bad_signature` · `stale_timestamp` · `replayed_seq` …)
+6. 다 쓰면 터널 닫기: `docker compose --profile tunnel stop tunnel`
+
+장치 쪽 동작: 사건을 0.3초 모아 최대 10건씩 보냄 · 실패(401 · 429 · 5xx · 연결)는 그 묶음을 들고 1→2→…30초 간격으로 다시 · 다시 보내도 안 되는 거절(400 · 403 · 409 · 413)은 버림(장치 `log` 에는 남음) · 보낼 때마다 새 번호 · 새 시각 · 새 서명. 서버 인증서는 `ca_roots.h` 의 루트 CA 로 확인 (`setInsecure` 안 씀, 다시 만들기 `python server/tools/make_ca_roots.py`).
 
 ## 알려 둘 제약
 - 이 PC 는 Windows 애플리케이션 제어 정책이 ESP32 컴파일러를 막는다 — 컴파일 · 실행은 Wokwi 에서 한다 (2026-11-22 실행 확인, 측정값은 `docs/개발문서_초안.md` 3.2).

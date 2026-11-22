@@ -37,7 +37,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://127.0.0.1:8090")
     ap.add_argument("--scenario", choices=SCENARIOS, default="intrusion")
-    ap.add_argument("--seq", type=int, default=int(time.time()), help="일련번호 (기본: 지금 시각 — 늘 커진다)")
+    ap.add_argument("--seq", type=int, default=int(time.time() * 1000), help="일련번호 (기본: 지금 시각 ms — 늘 커진다 · 장치도 유닉스 초×1000 에서 시작)")
     a = ap.parse_args()
     s = read_secrets()
     events = [{"t": i * 3, "type": t, "detail": d} for i, (t, d) in enumerate(SCENARIOS[a.scenario])]
