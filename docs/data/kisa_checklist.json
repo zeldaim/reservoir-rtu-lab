@@ -1,0 +1,165 @@
+{
+  "source": {
+    "title": "주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드 (2026년판)",
+    "publisher": "한국인터넷진흥원(KISA)",
+    "registered": "2025-12-24",
+    "url": "https://www.kisa.or.kr/2060204/form?postSeq=22",
+    "note": "원문 PDF(8.4MB) 첨부 다운로드는 JS 트리거(fnPostAttachDownload)라 직링크가 노출되지 않음 — /post/fileDownload?menuSeq=2060204&postSeq=22&attachSeq=1&lang_type=KO 로 2026-11-25 확인. 아래 항목 코드·제목·중요도는 이 PDF의 목차(UNIX 서버 p.7-10, 제어시스템 p.467-470)에서 옮김 — 점검 내용·판단 기준·조치 방법 전문은 아직 안 옮김(필요한 항목만 추후 추가)."
+  },
+  "unix": {
+    "section": "01. Unix 서버",
+    "categories": {
+      "1. 계정 관리": [
+        {"code": "U-01", "title": "root 계정 원격 접속 제한", "importance": "상"},
+        {"code": "U-02", "title": "비밀번호 관리정책 설정", "importance": "상"},
+        {"code": "U-03", "title": "계정 잠금 임계값 설정", "importance": "상"},
+        {"code": "U-04", "title": "비밀번호 파일 보호", "importance": "상"},
+        {"code": "U-05", "title": "root 이외의 UID가 '0' 금지", "importance": "상"},
+        {"code": "U-06", "title": "사용자 계정 su 기능 제한", "importance": "상"},
+        {"code": "U-07", "title": "불필요한 계정 제거", "importance": "하"},
+        {"code": "U-08", "title": "관리자 그룹에 최소한의 계정 포함", "importance": "중"},
+        {"code": "U-09", "title": "계정이 존재하지 않는 GID 금지", "importance": "하"},
+        {"code": "U-10", "title": "동일한 UID 금지", "importance": "중"},
+        {"code": "U-11", "title": "사용자 Shell 점검", "importance": "하"},
+        {"code": "U-12", "title": "세션 종료 시간 설정", "importance": "하"},
+        {"code": "U-13", "title": "안전한 비밀번호 암호화 알고리즘 사용", "importance": "중"}
+      ],
+      "2. 파일 및 디렉토리 관리": [
+        {"code": "U-14", "title": "root 홈, 패스 디렉터리 권한 및 패스 설정", "importance": "상"},
+        {"code": "U-15", "title": "파일 및 디렉터리 소유자 설정", "importance": "상"},
+        {"code": "U-16", "title": "/etc/passwd 파일 소유자 및 권한 설정", "importance": "상"},
+        {"code": "U-17", "title": "시스템 시작 스크립트 권한 설정", "importance": "상"},
+        {"code": "U-18", "title": "/etc/shadow 파일 소유자 및 권한 설정", "importance": "상"},
+        {"code": "U-19", "title": "/etc/hosts 파일 소유자 및 권한 설정", "importance": "상"},
+        {"code": "U-20", "title": "/etc/(x)inetd.conf 파일 소유자 및 권한 설정", "importance": "상"},
+        {"code": "U-21", "title": "/etc/(r)syslog.conf 파일 소유자 및 권한 설정", "importance": "상"},
+        {"code": "U-22", "title": "/etc/services 파일 소유자 및 권한 설정", "importance": "상"},
+        {"code": "U-23", "title": "SUID, SGID, Sticky bit 설정 파일 점검", "importance": "상"},
+        {"code": "U-24", "title": "사용자, 시스템 환경변수 파일 소유자 및 권한 설정", "importance": "상"},
+        {"code": "U-25", "title": "world writable 파일 점검", "importance": "상"},
+        {"code": "U-26", "title": "/dev에 존재하지 않는 device 파일 점검", "importance": "상"},
+        {"code": "U-27", "title": "$HOME/.rhosts, hosts.equiv 사용 금지", "importance": "상"},
+        {"code": "U-28", "title": "접속 IP 및 포트 제한", "importance": "상"},
+        {"code": "U-29", "title": "hosts.lpd 파일 소유자 및 권한 설정", "importance": "하"},
+        {"code": "U-30", "title": "UMASK 설정 관리", "importance": "중"},
+        {"code": "U-31", "title": "홈 디렉토리 소유자 및 권한 설정", "importance": "중"},
+        {"code": "U-32", "title": "홈 디렉토리로 지정한 디렉토리의 존재 관리", "importance": "중"},
+        {"code": "U-33", "title": "숨겨진 파일 및 디렉토리 검색 및 제거", "importance": "하"}
+      ],
+      "3. 서비스 관리": [
+        {"code": "U-34", "title": "Finger 서비스 비활성화", "importance": "상"},
+        {"code": "U-35", "title": "공유 서비스에 대한 익명 접근 제한 설정", "importance": "상"},
+        {"code": "U-36", "title": "r 계열 서비스 비활성화", "importance": "상"},
+        {"code": "U-37", "title": "crontab 설정파일 권한 설정 미흡", "importance": "상"},
+        {"code": "U-38", "title": "DoS 공격에 취약한 서비스 비활성화", "importance": "상"},
+        {"code": "U-39", "title": "불필요한 NFS 서비스 비활성화", "importance": "상"},
+        {"code": "U-40", "title": "NFS 접근 통제", "importance": "상"},
+        {"code": "U-41", "title": "불필요한 automountd 제거", "importance": "상"},
+        {"code": "U-42", "title": "불필요한 RPC 서비스 비활성화", "importance": "상"},
+        {"code": "U-43", "title": "NIS, NIS+ 점검", "importance": "상"},
+        {"code": "U-44", "title": "tftp, talk 서비스 비활성화", "importance": "상"},
+        {"code": "U-45", "title": "메일 서비스 버전 점검", "importance": "상"},
+        {"code": "U-46", "title": "일반 사용자의 메일 서비스 실행 방지", "importance": "상"},
+        {"code": "U-47", "title": "스팸 메일 릴레이 제한", "importance": "상"},
+        {"code": "U-48", "title": "expn, vrfy 명령어 제한", "importance": "중"},
+        {"code": "U-49", "title": "DNS 보안 버전 패치", "importance": "상"},
+        {"code": "U-50", "title": "DNS Zone Transfer 설정", "importance": "상"},
+        {"code": "U-51", "title": "DNS 서비스의 취약한 동적 업데이트 설정 금지", "importance": "중"},
+        {"code": "U-52", "title": "Telnet 서비스 비활성화", "importance": "중"},
+        {"code": "U-53", "title": "FTP 서비스 정보 노출 제한", "importance": "하"},
+        {"code": "U-54", "title": "암호화되지 않는 FTP 서비스 비활성화", "importance": "중"},
+        {"code": "U-55", "title": "FTP 계정 Shell 제한", "importance": "중"},
+        {"code": "U-56", "title": "FTP 서비스 접근 제어 설정", "importance": "하"},
+        {"code": "U-57", "title": "Ftpusers 파일 설정", "importance": "중"},
+        {"code": "U-58", "title": "불필요한 SNMP 서비스 구동 점검", "importance": "중"},
+        {"code": "U-59", "title": "안전한 SNMP 버전 사용", "importance": "상"},
+        {"code": "U-60", "title": "SNMP Community String 복잡성 설정", "importance": "중"},
+        {"code": "U-61", "title": "SNMP Access Control 설정", "importance": "상"},
+        {"code": "U-62", "title": "로그인 시 경고 메시지 설정", "importance": "하"},
+        {"code": "U-63", "title": "sudo 명령어 접근 관리", "importance": "중"}
+      ],
+      "4. 패치 관리": [
+        {"code": "U-64", "title": "주기적 보안 패치 및 벤더 권고사항 적용", "importance": "상"}
+      ],
+      "5. 로그 관리": [
+        {"code": "U-65", "title": "NTP 및 시각 동기화 설정", "importance": "중"},
+        {"code": "U-66", "title": "정책에 따른 시스템 로깅 설정", "importance": "중"},
+        {"code": "U-67", "title": "로그 디렉터리 소유자 및 권한 설정", "importance": "중"}
+      ]
+    }
+  },
+  "control_system": {
+    "section": "06. 제어시스템",
+    "categories": {
+      "1. 계정 관리": [
+        {"code": "C-01", "title": "계정 기능이 있는 제어시스템 구성요소에 대해 계정을 안전하게 설정하여 사용", "importance": "상"},
+        {"code": "C-02", "title": "제어시스템 계정의 로그인/로그아웃, 사용 명령 등 사용기록을 저장", "importance": "상"},
+        {"code": "C-03", "title": "제어시스템 계정입력 시 비밀번호 마스킹 처리, 입력값 에러 발생 시 제공 정보 제한 수행", "importance": "상"},
+        {"code": "C-04", "title": "제어시스템 계정을 관리, 운영, 유지보수 등 용도에 따라 분리하고 운용", "importance": "중"},
+        {"code": "C-05", "title": "제어시스템 계정에 대해 관리, 운영, 유지보수 등 용도에 맞는 최소 권한 부여", "importance": "중"},
+        {"code": "C-06", "title": "제어시스템 운전원별 유일 계정 부여 또는 시간별 사용자 기록 유지", "importance": "중"}
+      ],
+      "2. 서비스 관리": [
+        {"code": "C-07", "title": "제어시스템 구성요소에 대한 시간 동기화 수행", "importance": "상"},
+        {"code": "C-08", "title": "제어시스템에 불필요한 서비스 및 취약한 서비스 제거 또는 보완대책 수행", "importance": "상"},
+        {"code": "C-09", "title": "제어시스템 구성요소에 대한 관리자 페이지 운영 시 이에 대한 접근통제(사전인가 접근만 허용) 수행", "importance": "중"},
+        {"code": "C-10", "title": "제어시스템 내 파일/디렉터리 접근 권한 및 신뢰 관계를 적절히 부여", "importance": "중"},
+        {"code": "C-11", "title": "제어시스템 내 제어와 직접적인 관련이 없는 불필요 프로그램 삭제", "importance": "중"},
+        {"code": "C-12", "title": "제어시스템 운영 정보, 제어 명령 등 중요 정보에 대한 위변조 및 replay 공격 방지 대책 적용", "importance": "중"},
+        {"code": "C-13", "title": "제어시스템 내 전달되는 제어 명령 및 파라미터의 정상 범위를 식별하고 관리", "importance": "하"},
+        {"code": "C-14", "title": "제어시스템 내 사용자 통신 세션에 대해 세션 타임아웃 적용", "importance": "하"},
+        {"code": "C-15", "title": "GPS 스푸핑/재밍 공격 등 시각 동기화 서비스를 교란하기 위한 공격에 대비한 보안 조치 수행", "importance": "하"}
+      ],
+      "3. 패치 관리": [
+        {"code": "C-16", "title": "제어시스템에 대한 최신 업데이트, 보안패치를 안전하게 적용하기 위한 제조사 협력방안, 테스트 방안 등의 절차 수립", "importance": "상"},
+        {"code": "C-17", "title": "외부 업체, 인터넷을 통한 다운로드 등의 경로로 반입된 각종 패치·업데이트 파일에 대해 무결성 검증 및 클린 PC를 통한 악성코드 존재 여부 검사 수행", "importance": "상"},
+        {"code": "C-18", "title": "제어시스템 구성요소의 알려진 취약점에 대해 보안패치 적용 또는 상응하는 대응책 적용", "importance": "상"},
+        {"code": "C-19", "title": "운영체제, 응용프로그램, 펌웨어 등에 대한 안정성이 확인된 최신 버전의 소프트웨어 사용 및 기술지원이 종료된 제품 미사용", "importance": "중"},
+        {"code": "C-20", "title": "제어시스템 개선, 신규 시스템 도입, 패치 및 수정 시, 안전성을 테스트하기 위한 테스트베드 또는 시험환경을 구축", "importance": "하"}
+      ],
+      "4. 네트워크 접근통제": [
+        {"code": "C-21", "title": "제어 네트워크는 업무망, 인터넷, CCTV망 등 외부망과 물리적으로 분리하여 사용", "importance": "상"},
+        {"code": "C-22", "title": "제어 네트워크 외부로 자료전달 시 물리적 일방향 자료전달 환경을 구축하여 외부에서 제어 네트워크로의 침입을 차단", "importance": "상"},
+        {"code": "C-23", "title": "제어 네트워크에 무선인터넷, 테더링, 외부 유선망 등의 외부망 연결을 제한하고 주기적으로 점검", "importance": "상"},
+        {"code": "C-24", "title": "제어 네트워크에 비인가된 시스템/기기에 대한 연결 및 접속을 차단", "importance": "상"},
+        {"code": "C-25", "title": "물리적 일방향 자료전달 환경의 올바른 동작 및 운용에 대한 주기적인 점검 수행", "importance": "상"},
+        {"code": "C-26", "title": "제어 네트워크를 용도에 따라 세분화하고, 접근제어를 수행하여 제어시스템 운영에 필요한 네트워크, 시스템 간의 통신만 허용", "importance": "하"}
+      ],
+      "5. 물리적 접근통제": [
+        {"code": "C-27", "title": "제어시스템에 대해 네트워크 포트, USB 포트 등 외부 연결 접점에 대해 허가받은 사항을 제외하고 모두 물리적 또는 논리적으로 차단", "importance": "상"},
+        {"code": "C-28", "title": "제어시스템 구성요소를 물리적으로 보호할 수 있는 조치 적용(잠금장치가 있는 함체, 랙, 수납 책상 등)", "importance": "중"}
+      ],
+      "6. 보안위협 탐지": [
+        {"code": "C-29", "title": "백신 프로그램 설치가 가능한 제어시스템 구성요소에 대해 악성코드 감염 및 차단을 위한 백신 프로그램 설치", "importance": "상"},
+        {"code": "C-30", "title": "이상 트래픽 발생 탐지 등 제어시스템 내의 보안 관리를 위해 적합한 침입탐지시스템 등을 구축 및 운용하고, 구축된 보안 솔루션 및 보안 장비에서 탐지한 보안 이벤트에 대해 모니터링 수행", "importance": "하"}
+      ],
+      "7. 복구 대응": [
+        {"code": "C-31", "title": "제어시스템 대상 사이버 위기대응 매뉴얼을 수립", "importance": "상"},
+        {"code": "C-32", "title": "제어시스템 대상 사이버 위기대응 훈련을 정기적으로 시행", "importance": "상"},
+        {"code": "C-33", "title": "제어시스템 침해사고 대응을 위한 제어시스템 설정, 중요 데이터 등을 백업 및 관리", "importance": "상"},
+        {"code": "C-34", "title": "제어시스템의 장애 발생, 사이버 공격, 물리적 테러 등에 대한 비상계획 수립", "importance": "중"},
+        {"code": "C-35", "title": "제어시스템의 장애 발생, 사이버 공격, 물리적 테러 등에 대한 비상계획 훈련을 정기적으로 시행", "importance": "중"},
+        {"code": "C-36", "title": "제어시스템 조작 불능에 대비하여 수작업 운전 매뉴얼 작성 및 교육훈련 시행", "importance": "중"},
+        {"code": "C-37", "title": "제어시스템의 각종 이벤트에 대한 로그를 관리하기 위한 중앙집중식 로그 관리 수행", "importance": "하"},
+        {"code": "C-38", "title": "제어시스템 구성요소의 기준 형상을 설정하고 변경 및 업데이트 시 형상관리 수행", "importance": "하"},
+        {"code": "C-39", "title": "제어시스템 주요 장비 및 제어 네트워크 장비에 대해 이중화", "importance": "하"},
+        {"code": "C-40", "title": "제어시스템 보호를 위한 화재탐지 설비 및 화재 진압설비를 구비", "importance": "하"},
+        {"code": "C-41", "title": "제어시스템 보호를 위한 누수탐지 설비 및 침수 대응 장비 구비", "importance": "하"},
+        {"code": "C-42", "title": "제어시스템에 대하여 정기적으로 사이버 위험 시나리오를 식별하고, 완화방안 수립", "importance": "하"}
+      ],
+      "8. 보안 관리": [
+        {"code": "C-43", "title": "제어시스템 구성요소에 대한 자산정보(담당자, 펌웨어 버전, 설치 SW 등)를 항상 최신으로 유지관리", "importance": "상"},
+        {"code": "C-44", "title": "제어시스템 중요 구성요소가 설치된 장소를 보호구역으로 설정", "importance": "상"},
+        {"code": "C-45", "title": "제어시스템에서 USB 등 이동형 저장 매체를 사용해야 하는 경우, 사전정의된 정책에 따라 사용", "importance": "상"},
+        {"code": "C-46", "title": "제어 네트워크에 연결되는 외부 정보통신기기 반·출입 시 클린존 통과, 관리대장 작성 등 관리절차 마련", "importance": "상"},
+        {"code": "C-47", "title": "제어시스템의 특성을 반영한 정보보안 정책, 지침을 수립", "importance": "중"},
+        {"code": "C-48", "title": "제어시스템 운영 업무에 대해 표준 업무 절차서를 작성하고 적용", "importance": "중"},
+        {"code": "C-49", "title": "제어시스템 유지보수를 위한 전용 장비(노트북 등)를 마련하고 관련 정책을 시행", "importance": "하"},
+        {"code": "C-50", "title": "허가에 의한 로직 변경 정책 수립", "importance": "상"}
+      ],
+      "9. 교육 훈련": [
+        {"code": "C-51", "title": "제어시스템 운전원, 관리자, 유지보수인력, 보안 인력에 대해 직무별 직무교육을 정기적으로 실시", "importance": "하"}
+      ]
+    }
+  }
+}
