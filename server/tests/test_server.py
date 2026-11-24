@@ -207,3 +207,43 @@ def test_bola_vuln_vs_fixed(tmp_path):
 def test_bola_vuln_off_by_default(tmp_path):
     c = make(tmp_path, vuln=None)                                             # 환경변수 없음 = 꺼짐
     assert c.get("/api/v0/sites/site-a/events", headers={"Authorization": "Bearer op-b"}).status_code == 404
+
+
+def test_shadow_api_unknown_path_recorded(client):
+    r = client.get("/api/v1/sites/site-a/export", headers={"Authorization": "Bearer op-a"})
+    assert r.status_code == 404
+    dets = client.app.state.store.detections("site-a", time.time() - 10)
+    kinds = [d["kind"] for d in dets]
+    assert "SHADOW_API_PROBE" in kinds
+    hit = next(d for d in dets if d["kind"] == "SHADOW_API_PROBE")
+    assert hit["method"] == "GET" and hit["path"] == "/api/v1/sites/site-a/export"
+
+
+def test_shadow_api_hidden_vuln_route_when_off(tmp_path):
+    c = make(tmp_path, vuln=None)                                             # 꺼짐 상태 — /api/v0 는 '숨은 API'
+    r = c.get("/api/v0/sites/site-a/events", headers={"Authorization": "Bearer op-b"})
+    assert r.status_code == 404
+    dets = c.app.state.store.detections("site-a", time.time() - 10)
+    assert any(d["kind"] == "SHADOW_API_PROBE" and d["path"] == "/api/v0/sites/site-a/events" for d in dets)
+
+
+def test_shadow_api_non_api_path_not_recorded(client):
+    r = client.get("/robots.txt")
+    assert r.status_code == 404
+    dets = client.app.state.store.detections("_system", time.time() - 10)
+    assert dets == []                                        # /api/ 로 시작하지 않으면 사건으로 안 남긴다
+
+
+def test_shadow_api_dedupe(client):
+    client.get("/api/v1/sites/site-a/export", headers={"Authorization": "Bearer op-a"})
+    before = len(client.app.state.store.detections("site-a", time.time() - 10))
+    client.get("/api/v1/sites/site-a/export", headers={"Authorization": "Bearer op-a"})   # 60초 안 재요청 — 또 안 남음
+    after = len(client.app.state.store.detections("site-a", time.time() - 10))
+    assert after == before
+
+
+def test_shadow_api_distinct_paths_both_recorded(client):
+    client.get("/api/v1/sites/site-a/export", headers={"Authorization": "Bearer op-a"})
+    client.get("/api/v1/sites/site-a/backup.zip", headers={"Authorization": "Bearer op-a"})   # 다른 경로 — 둘 다 남아야 함
+    paths = {d["path"] for d in client.app.state.store.detections("site-a", time.time() - 10)}
+    assert {"/api/v1/sites/site-a/export", "/api/v1/sites/site-a/backup.zip"} <= paths

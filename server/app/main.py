@@ -16,10 +16,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import detect
 from . import report as reportmod
@@ -148,6 +150,25 @@ def create_app(store: Store | None = None, devices: dict | None = None, operator
         engine, rep = reportmod.make_report(events, client=app.state.ai_client)
         app.state.store.save_report(site_id, engine, rep)
         return {"engine": engine, "events": len(events), "report": rep}
+
+    # 6단계 — 숨은 API 탐지: 명세(= 이 라우트 목록 자체, spec/rtu_openapi.json 은 사람이 읽는 문서용)에
+    # 없는 (메서드, 경로) 호출은 FastAPI 가 404 · 405 로 답한다. 그걸 그 자리에서 사건처럼 기록한다.
+    # 명세 파일을 따로 두지 않아 "손으로 고치면 명세와 어긋난다"는 위험 자체가 없다 (tools/gen_openapi.py 참고).
+    SITE_RE = re.compile(r"^/api/v\d+/sites/([^/]+)/")
+
+    @app.exception_handler(StarletteHTTPException)
+    async def shadow_api_handler(request: Request, exc: StarletteHTTPException):
+        if exc.status_code in (404, 405) and request.url.path.startswith("/api/"):
+            m = SITE_RE.match(request.url.path)
+            site_id = m.group(1) if m else "_system"
+            # window 를 "메서드 경로"로 써서 중복 제거(site_id·kind·window 조합, store.add_detection)가
+            # 경로가 다른 또 다른 탐색까지 묻어 버리지 않게 한다 (같은 경로 재요청만 60초 동안 한 번).
+            det = {"kind": "SHADOW_API_PROBE", "window": f"{request.method} {request.url.path}",
+                  "method": request.method, "path": request.url.path,
+                  "detail": f"명세에 없는 호출: {request.method} {request.url.path} ({exc.status_code})"}
+            if app.state.store.add_detection(site_id, det, dedupe_s=60):
+                log.warning("shadow-api site=%s %s %s -> %s", site_id, request.method, request.url.path, exc.status_code)
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
     return app
 
