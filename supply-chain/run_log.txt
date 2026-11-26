@@ -1,0 +1,30 @@
+$ bash supply-chain/run.sh rtu-server:locked   # fastapi 0.115.6 → 0.165.0 (starlette 0.41.3 → 1.10.0) 적용 후 재스캔
+# 2026-11-26 14:51:04
+
+[SBOM] rtu-server:locked
+[취약점] rtu-server:locked
+이미지 rtu-server:locked
+SBOM 구성요소 123개 (CycloneDX)
+취약점 일치 232건 — 심각도 {'High': 82, 'Medium': 80, 'Negligible': 51, 'Low': 13, 'Unknown': 6} · {'수정 없음/미확정': 211, '수정 버전 있음': 21}
+  High     CVE-2025-69720       libncursesw6 6.5+20250216-2 → 수정: -
+  High     CVE-2025-69720       libtinfo6 6.5+20250216-2 → 수정: -
+  High     CVE-2025-69720       ncurses-base 6.5+20250216-2 → 수정: -
+  High     CVE-2025-69720       ncurses-bin 6.5+20250216-2 → 수정: -
+  High     CVE-2026-102010      gcc-14-base 14.2.0-19 → 수정: -
+  High     CVE-2026-102010      libgcc-s1 14.2.0-19 → 수정: -
+  High     CVE-2026-102010      libstdc++6 14.2.0-19 → 수정: -
+  High     CVE-2026-107493      libssl3t64 3.5.9-1~deb13u1 → 수정: -
+  High     CVE-2026-107493      openssl 3.5.9-1~deb13u1 → 수정: -
+  High     CVE-2026-107493      openssl-provider-legacy 3.5.9-1~deb13u1 → 수정: -
+  High     CVE-2026-107494      libssl3t64 3.5.9-1~deb13u1 → 수정: -
+  High     CVE-2026-107494      openssl 3.5.9-1~deb13u1 → 수정: -
+[서명] 7개 파일
+[검증]
+  OK   sbom-rtu-server-locked.cdx.json
+  OK   vulns-rtu-server-locked.json
+  OK   summary-rtu-server-locked.txt
+  OK   signed-server-requirements.lock
+  OK   signed-server-requirements.txt
+  OK   signed-server-Dockerfile
+  OK   signed-server-docker-compose.yml
+exit=0

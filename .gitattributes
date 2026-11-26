@@ -1,0 +1,5 @@
+# 서명·해시로 검증하는 파일은 줄바꿈을 바꾸지 않는다 (Windows 클론에서 LF→CRLF 로 바뀌면 서명 검증이 실패한다)
+supply-chain/** -text
+server/requirements.* -text
+server/Dockerfile -text
+server/docker-compose.yml -text

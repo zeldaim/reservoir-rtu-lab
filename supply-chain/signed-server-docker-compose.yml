@@ -1,0 +1,31 @@
+# 관제 서버
+#   python tools/provision.py                       처음 한 번 — .env(서버) · firmware/rtu/secrets.h(장치) 만들기
+#   docker compose up -d --build                    서버 + nginx (내 PC 에서만: http://127.0.0.1:8090)
+#   docker compose --profile tunnel up -d tunnel    인터넷 임시 주소 열기 (시연 · 시험 때만!)
+#   docker compose logs tunnel | grep trycloudflare  → 그 주소를 secrets.h 의 SERVER_URL 에
+#   docker compose --profile tunnel stop tunnel     다 쓰면 닫기
+name: rtu   # 프로젝트 이름 고정 — 어느 명령으로 띄워도 같은 서버 · 같은 DB (폴더 이름 'server' 로 두 벌 뜨며 8090 충돌하던 것 방지)
+services:
+  api:
+    build: .
+    env_file: [.env]
+    environment:
+      LAB_VULN_BOLA: ${LAB_VULN_BOLA:-0}   # 5단계 시연 때만 1 (취약 경로 /api/v0 켜짐) — 터널을 연 채로 켜지 말 것
+    volumes: [rtu-data:/data]
+    restart: unless-stopped
+
+  nginx:
+    image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10   # nginx:1.27-alpine, 2026-11-26 다이제스트로 고정
+    volumes: [./nginx.conf:/etc/nginx/nginx.conf:ro]
+    ports: ["127.0.0.1:8090:80"]
+    depends_on: [api]
+    restart: unless-stopped
+
+  tunnel:
+    image: cloudflare/cloudflared@sha256:cb38f3f30910a7d51545118a179b8516eb7066eac61855d62ce6ed733c54ce70   # cloudflared 2024.12.2, 다이제스트로 고정
+    profiles: ["tunnel"]
+    command: ["tunnel", "--no-autoupdate", "--url", "http://nginx:80"]
+    depends_on: [nginx]
+
+volumes:
+  rtu-data:
